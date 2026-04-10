@@ -1,6 +1,6 @@
 {
   "name": "null",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "A terminal-native AI CLI that turns natural language into real actions.",
   "homepage": "https://github.com/daniel99412/null#readme",
   "bugs": {
@@ -10,13 +10,17 @@
     "type": "git",
     "url": "git+https://github.com/daniel99412/null.git"
   },
-  "license": "ISC",
+  "license": "MIT",
   "author": "Daniel Pardo",
-  "type": "commonjs",
-  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "null": "./dist/index.js"
+  },
   "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
     "commit": "cz",
-    "test": "echo \"Error: no test specified\" && exit 1",
     "prepare": "husky install"
   },
   "config": {
@@ -27,8 +31,20 @@
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
+    "@types/node": "^22.19.17",
+    "@types/react": "^19.2.14",
     "commitizen": "^4.3.1",
     "cz-conventional-changelog": "^3.3.0",
-    "husky": "^8.0.0"
+    "husky": "^8.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.15.0",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "ink": "^7.0.0",
+    "ora": "^9.3.0",
+    "react": "^19.2.5"
   }
 }
