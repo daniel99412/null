@@ -1,0 +1,30 @@
+{
+  "name": "null",
+  "version": "1.0.0",
+  "description": "A terminal-native AI CLI that turns natural language into real actions.",
+  "homepage": "https://github.com/daniel99412/null#readme",
+  "bugs": {
+    "url": "https://github.com/daniel99412/null/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daniel99412/null.git"
+  },
+  "license": "ISC",
+  "author": "Daniel Pardo",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "commit": "cz",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
+  },
+  "devDependencies": {
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "^3.3.0"
+  }
+}
