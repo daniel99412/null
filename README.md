@@ -1,38 +1,41 @@
-# ⚡ Forge CLI
+# ⚡ Null CLI
 
-A terminal-native AI CLI that turns natural language into real actions.
+Your AI-powered virtual secretary that runs in the terminal.
 
-Forge is a lightweight, local-first developer tool that uses LLMs to understand your intent and execute tasks directly from your terminal — from generating files to automating workflows.
+Null is a personal assistant that understands what you need and gets it done — whether it's answering questions by researching online, generating code, automating tasks, or handling anything else you throw at it. All powered by local LLMs.
 
 ---
 
 ## 🚀 Features
 
-* 🧠 Natural language → real actions
-* ⚡ Fast, local-first (powered by Ollama)
-* 📄 Generate files (PRDs, docs, code)
-* 🔌 Extensible tool system (filesystem, APIs, etc.)
-* 🗂️ Persistent memory (SQLite-based)
-* 🛠️ Dev mode with full debugging visibility
-* 🎯 Designed for developer workflows
+- 🤖 Acts as your virtual secretary — understands what you need and does it
+- 🧠 Answers questions by researching online or using LLM knowledge
+- 💻 Generates and writes code directly
+- 📄 Creates documents, files, and any content you need
+- 🌐 Web research — fetches info, summarizes articles, answers questions
+- 🔌 Extensible tool system (filesystem, APIs, web search, etc.)
+- 🗂️ Persistent memory with SQLite — learns from past interactions
+- 💬 Multi-turn conversations that feel natural
+- ⚡ Fast and local-first (powered by Ollama)
+- 🛠️ Dev mode with full debugging visibility
 
 ---
 
 ## 🧰 Tech Stack
 
-* **TypeScript**
-* **CLI:** Commander
-* **TUI:** Ink (planned)
-* **LLM Runtime:** Ollama
-* **Database:** SQLite
+- **TypeScript**
+- **CLI:** Commander
+- **TUI:** Ink (planned)
+- **LLM Runtime:** Ollama
+- **Database:** SQLite
 
 ---
 
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/your-username/forge-cli.git
-cd forge-cli
+git clone https://github.com/your-username/Null-cli.git
+cd Null-cli
 npm install
 npm link
 ```
@@ -41,8 +44,8 @@ npm link
 
 ## 🧠 Requirements
 
-* Node.js 18+
-* Ollama installed and running locally
+- Node.js 18+
+- Ollama installed and running locally
 
 Pull a model:
 
@@ -55,50 +58,65 @@ ollama pull qwen2.5-coder:7b
 ## ⚡ Usage
 
 ```bash
-forge "create a PRD for an inventory SaaS"
+Null "create a PRD for an inventory SaaS"
 ```
 
 ---
 
 ## 💡 Examples
 
-### Generate a document
+### Answer questions (web research)
 
 ```bash
-forge "create a product requirements document for a SaaS app"
+Null "what are the latest developments in AI agents?"
+Null "summarize this article: https://example.com/article"
+```
+
+### Generate code
+
+```bash
+Null "write a Python script to backup my database"
+Null "create a React component for a login form"
+```
+
+### Generate documents
+
+```bash
+Null "create a product requirements document for a SaaS app"
+Null "write a README for my project"
 ```
 
 ### Continue a conversation
 
 ```bash
-forge "continue the previous idea"
+Null "continue the previous idea"
 ```
 
 ### (Planned) Create tickets
 
 ```bash
-forge "generate Jira tickets from this idea"
+Null "generate Jira tickets from this idea"
 ```
 
 ---
 
 ## 🧠 How it works
 
-1. You provide a natural language input
-2. Forge sends context + prompt to a local LLM via Ollama
-3. The model returns structured output (JSON)
-4. Forge executes the corresponding action
-5. Results are displayed in the terminal
+1. You describe what you need in plain language
+2. Null understands your intent and decides how to help
+3. If needed, it researches online or uses LLM knowledge
+4. It executes the appropriate action (code, files, web search, etc.)
+5. Results are delivered directly in your terminal
 
 ---
 
 ## 🗂️ Memory System
 
-* Conversations are stored locally using SQLite
-* Supports session-based context
-* Casual conversations expire after a defined time (TTL)
-* Long-term project context is preserved
-* Old conversations are summarized into lightweight memory
+- Conversations are stored locally using SQLite
+- Supports session-based context
+- Casual conversations expire after a defined time (TTL)
+- Long-term project context is preserved
+- Old conversations are summarized into lightweight memory
 
 ---
 
@@ -107,37 +125,37 @@ forge "generate Jira tickets from this idea"
 Enable debug mode to inspect internal behavior:
 
 ```bash
-forge "create a PRD" --dev
+Null "create a PRD" --dev
 ```
 
 Includes:
 
-* Loaded context
-* Generated prompts
-* Execution steps
-* Performance metrics
+- Loaded context
+- Generated prompts
+- Execution steps
+- Performance metrics
 
 ---
 
 ## 🧩 Roadmap
 
-* [ ] JSON-based action system
-* [ ] Filesystem tools (read/write)
-* [ ] Google Calendar integration
-* [ ] Jira integration
-* [ ] Multi-step task execution
-* [ ] Plugin system
-* [ ] Interactive TUI (Ink)
+- [ ] JSON-based action system
+- [ ] Filesystem tools (read/write)
+- [ ] Google Calendar integration
+- [ ] Jira integration
+- [ ] Multi-step task execution
+- [ ] Plugin system
+- [ ] Interactive TUI (Ink)
 
 ---
 
 ## 🔒 Privacy
 
-Forge is designed to run locally:
+Null is designed to run locally:
 
-* No data is sent to external APIs (unless configured)
-* Full control over your data and workflows
-* Ideal for private codebases and sensitive environments
+- No data is sent to external APIs (unless configured)
+- Full control over your data and workflows
+- Ideal for private codebases and sensitive environments
 
 ---
 
@@ -156,11 +174,11 @@ Use with caution when executing automated actions.
 
 ## 💥 Vision
 
-Forge aims to become a developer-native AI interface:
+Null aims to be your go-to virtual secretary:
 
-* Not a chatbot
-* Not a wrapper
-* A real tool that understands intent and executes actions
+- Not just a chatbot
+- Not just a code generator
+- A capable assistant that handles whatever you need
 
 ---
 
@@ -173,8 +191,8 @@ Feel free to open issues or submit pull requests.
 
 ## 🧠 Philosophy
 
-> Less talking. More doing.
+> Your AI secretary. Your terminal. Infinite possibilities.
 
-Forge is built around a simple idea:
-AI should not just answer — it should act.
+Null is built around a simple idea:
 
+AI should understand what you mean and get things done.

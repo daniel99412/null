@@ -1,7 +1,13 @@
 import { Command } from "commander";
 import { runTUI } from "../tui/App.js";
 
+function clearScreen() {
+    process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+}
+
 export function runCLI() {
+    clearScreen();
+    
     const program = new Command();
 
     program
@@ -15,7 +21,7 @@ export function runCLI() {
         .option("--dev", "enable debug mode")
         .action((promptParts: string[], options) => {
             if (!promptParts || promptParts.length === 0) {
-                runTUI(options);
+                runTUI();
                 return;
             }
 
