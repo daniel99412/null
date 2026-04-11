@@ -1,40 +1,14 @@
-import React, { useState, useRef, useEffect } from "react";
-import { render, Box, Text, useInput, useApp } from "ink";
+import React, { useState, useRef } from "react";
+import { render, Box, useInput, useApp } from "ink";
 import { streamChat } from "../core/ollama.js";
 import { tools } from "../core/tools.js";
-
-function wrapText(text: string, width: number): string[] {
-  const lines: string[] = [];
-  const paragraphs = text.split(/\n\n+/);
-
-  for (const paragraph of paragraphs) {
-    if (paragraph.trim() === "") {
-      lines.push("");
-      continue;
-    }
-
-    const paraLines = paragraph.split("\n");
-    for (const paraLine of paraLines) {
-      const words = paraLine.split(" ");
-      let line = "";
-
-      for (const w of words) {
-        if ((line + w).length > width) {
-          lines.push(line);
-          line = w + " ";
-        } else {
-          line += w + " ";
-        }
-      }
-
-      if (line.trim()) lines.push(line);
-    }
-  }
-
-  return lines;
-}
-
-const LOADING_BAR_WIDTH = 12;
+import { formatMessage } from "./utils/text.js";
+import { useScroll } from "./hooks/useScroll.js";
+import { useLoading } from "./hooks/useLoading.js";
+import { useCursor } from "./hooks/useCursor.js";
+import { MessageList } from "./components/MessageList.js";
+import { Input } from "./components/Input.js";
+import { Footer } from "./components/Footer.js";
 
 export function App() {
   const { exit } = useApp();
@@ -49,80 +23,20 @@ export function App() {
   const [messages, setMessages] = useState<
     { role: "user" | "assistant"; content: string }[]
   >([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingPos, setLoadingPos] = useState(0);
-  const [loadingDir, setLoadingDir] = useState(1);
-  const [cursorVisible, setCursorVisible] = useState(true);
 
-  const scrollOffsetRef = useRef(0);
-  const isUserScrollingRef = useRef(false);
-  const [, forceUpdate] = useState(0);
+  const { isLoading, loadingPos, startLoading, stopLoading } = useLoading();
+  const { isVisible: cursorVisible } = useCursor(isLoading);
 
   const buffer = useRef("");
 
-  useEffect(() => {
-    if (!isLoading) return;
-
-    const posInterval = setInterval(() => {
-      setLoadingPos((p) => {
-        if (p >= LOADING_BAR_WIDTH - 1) {
-          setLoadingDir(-1);
-          return p - 1;
-        }
-        if (p <= 0) {
-          setLoadingDir(1);
-          return p + 1;
-        }
-        return p + loadingDir;
-      });
-    }, 60);
-
-    return () => {
-      clearInterval(posInterval);
-    };
-  }, [isLoading, loadingDir]);
-
-  useEffect(() => {
-    if (isLoading) {
-      setCursorVisible(false);
-      return;
-    }
-
-    const cursorInterval = setInterval(() => {
-      setCursorVisible((v) => !v);
-    }, 500);
-
-    return () => {
-      clearInterval(cursorInterval);
-    };
-  }, [isLoading]);
-
-  const allLines = messages.flatMap((m) => {
-    const prefix = m.role === "user" ? "❯ " : "  ";
-    const wrapped = wrapText(m.content, terminalWidth - 4);
-    return wrapped.map((l, i) => (i === 0 ? prefix + l : "  " + l));
-  });
-
-  const maxScroll = Math.max(0, allLines.length - contentHeight);
-  const currentScroll = Math.min(scrollOffsetRef.current, maxScroll);
-
-  const visibleStart = Math.max(
-    0,
-    allLines.length - contentHeight - currentScroll,
-  );
-  const visibleLines = allLines.slice(
-    visibleStart,
-    visibleStart + contentHeight,
+  const allLines = messages.flatMap((m) =>
+    formatMessage(m.content, m.role, terminalWidth),
   );
 
-  const isAtBottom = currentScroll === 0;
+  const { scrollOffset, visibleStart, visibleLines, isAtBottom, handleUp, handleDown, resetScroll } =
+    useScroll(allLines, { maxLines: contentHeight });
 
-  function renderLoadingBar() {
-    const pos = loadingPos;
-    const left = " ".repeat(Math.max(0, pos));
-    const right = " ".repeat(Math.max(0, LOADING_BAR_WIDTH - pos - 1));
-    return `[${left}█${right}]`;
-  }
+  const hasMoreLines = allLines.length > contentHeight;
 
   useInput((char, key) => {
     if (key.ctrl && char === "c") exit();
@@ -142,23 +56,15 @@ export function App() {
       ]);
 
       setInput("");
-      isUserScrollingRef.current = false;
-      scrollOffsetRef.current = 0;
-      forceUpdate((n) => n + 1);
-      setIsLoading(true);
-      setLoadingPos(0);
-      setLoadingDir(1);
+      resetScroll();
+      startLoading();
       buffer.current = "";
 
       let prompt = txt;
 
-      const asksTime = /\bhora\b|\bque\s*hora\b|\bdime\s*la\s*hora\b/i.test(
-        txt,
-      );
+      const asksTime = /\bhora\b|\bque\s*hora\b|\bdime\s*la\s*hora\b/i.test(txt);
       const asksDate =
-        /\bfecha\b|\bdia\b|\bque\s*dia\b|\bdime\s*la\s*fecha\b|\ba\s*que\s*dia\b/i.test(
-          txt,
-        );
+        /\bfecha\b|\bdia\b|\bque\s*dia\b|\bdime\s*la\s*fecha\b|\ba\s*que\s*dia\b/i.test(txt);
 
       if (asksTime && asksDate) {
         const t = tools.get_time();
@@ -182,39 +88,21 @@ export function App() {
           }
           return copy;
         });
-
-        if (!isUserScrollingRef.current) {
-          forceUpdate((n) => n + 1);
-        }
       }).then(() => {
-        setIsLoading(false);
+        stopLoading();
         buffer.current = "";
-        forceUpdate((n) => n + 1);
       });
 
       return;
     }
 
     if (key.upArrow) {
-      if (maxScroll > 0) {
-        isUserScrollingRef.current = true;
-        scrollOffsetRef.current = Math.min(
-          scrollOffsetRef.current + 3,
-          maxScroll,
-        );
-        forceUpdate((n) => n + 1);
-      }
+      handleUp();
       return;
     }
 
     if (key.downArrow) {
-      if (scrollOffsetRef.current > 0) {
-        scrollOffsetRef.current = Math.max(scrollOffsetRef.current - 3, 0);
-        if (scrollOffsetRef.current === 0) {
-          isUserScrollingRef.current = false;
-        }
-        forceUpdate((n) => n + 1);
-      }
+      handleDown();
       return;
     }
 
@@ -230,45 +118,21 @@ export function App() {
 
   return (
     <Box flexDirection="column" height={process.stdout?.rows || 24}>
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {visibleLines.map((line, i) => (
-          <Text
-            key={visibleStart + i}
-            color={line.startsWith("❯") ? "cyan" : "white"}
-          >
-            {line}
-          </Text>
-        ))}
-      </Box>
+      <MessageList lines={allLines} visibleStart={visibleStart} />
 
-      <Box
-        flexDirection="column"
-        borderStyle="single"
-        borderColor="gray"
-        paddingX={1}
-        paddingY={1}
-        height={inputHeight}
-      >
-        <Text color="yellow">
-          ❯ {input}
-          {cursorVisible && !isLoading && <Text color="yellow">▎</Text>}
-        </Text>
-      </Box>
+      <Input
+        value={input}
+        cursorVisible={cursorVisible}
+        isLoading={isLoading}
+      />
 
-      <Box
-        height={1}
-        paddingX={1}
-        justifyContent="space-between"
-        alignItems="center"
-      >
-        <Text color="cyan">{isLoading && renderLoadingBar()}</Text>
-        <Text color="gray">
-          {!isAtBottom && !isLoading && allLines.length > contentHeight
-            ? `▲ ${currentScroll} lines | `
-            : ""}
-          ↑↓ scroll | /exit | ctrl+c
-        </Text>
-      </Box>
+      <Footer
+        isLoading={isLoading}
+        loadingPos={loadingPos}
+        isAtBottom={isAtBottom}
+        hasMoreLines={hasMoreLines}
+        scrollOffset={scrollOffset}
+      />
     </Box>
   );
 }
