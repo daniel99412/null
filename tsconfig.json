@@ -1,9 +1,6 @@
 {
     "compilerOptions": {
         "jsx": "react",
-        "jsx": "react",
-        "jsx": "react",
-        "jsx": "react",
         "target": "ES2022",
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
@@ -18,5 +15,5 @@
     },
     "include": [
         "src"
-    ],
+    ]
 }

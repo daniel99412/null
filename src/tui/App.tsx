@@ -1,124 +1,314 @@
-import React, { useState, useRef } from "react";
-import { render, Box, useInput, useApp } from "ink";
-import { streamChat } from "../core/ollama.js";
-import { tools } from "../core/tools.js";
-import { formatMessage } from "./utils/text.js";
-import { useScroll } from "./hooks/useScroll.js";
-import { useLoading } from "./hooks/useLoading.js";
-import { useCursor } from "./hooks/useCursor.js";
-import { MessageList } from "./components/MessageList.js";
-import { Input } from "./components/Input.js";
-import { Footer } from "./components/Footer.js";
+import React, { useState, useRef, useCallback, useEffect } from 'react'
+import { render, Box, Text, useInput, useApp } from 'ink'
+import { streamChat } from '../core/ollama.js'
+import { tools } from '../core/tools.js'
+import { useLoading } from './hooks/useLoading.js'
+import { useCursor } from './hooks/useCursor.js'
+import { Splash } from './components/Splash.js'
+import { Header } from './components/Header.js'
+import { MessageList, countRenderedLines } from './components/MessageList.js'
+import type { ChatMessage } from './components/MessageList.js'
+import { Input } from './components/Input.js'
+import { Footer } from './components/Footer.js'
+import { Goodbye } from './components/Goodbye.js'
+import { CommandPalette } from './components/CommandPalette.js'
+import type { CommandItem } from './components/CommandPalette.js'
+import { SessionList } from './components/SessionList.js'
+import {
+  createSession,
+  getSession,
+  getSessionMessages,
+  saveMessage,
+  updateSessionTitle,
+  closeDb,
+} from '../memory/sessions.js'
+import type { Session } from '../memory/sessions.js'
 
-export function App() {
-  const { exit } = useApp();
+const MODEL = 'qwen2.5-coder:7b'
 
-  const terminalWidth = process.stdout?.columns || 80;
-  const inputHeight = 4;
-  const footerHeight = 1;
-  const contentHeight =
-    (process.stdout?.rows || 24) - inputHeight - footerHeight;
+const COMMANDS: CommandItem[] = [
+  { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
+  { id: 'new-session', label: 'New Session', description: 'Start a fresh conversation', shortcut: '' },
+  { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
+  { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
+]
 
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<
-    { role: "user" | "assistant"; content: string }[]
-  >([]);
+type Overlay = 'none' | 'command-palette' | 'sessions'
 
-  const { isLoading, loadingPos, startLoading, stopLoading } = useLoading();
-  const { isVisible: cursorVisible } = useCursor(isLoading);
+interface ChatProps {
+  resumeSessionId?: string
+  onExit: (sessionId: string, sessionDate: string, hasMessages: boolean) => void
+}
 
-  const buffer = useRef("");
+function Chat({ resumeSessionId, onExit }: ChatProps) {
+  const { exit } = useApp()
 
-  const allLines = messages.flatMap((m) =>
-    formatMessage(m.content, m.role, terminalWidth),
-  );
+  const terminalWidth = process.stdout?.columns || 80
+  const terminalHeight = process.stdout?.rows || 24
+  const headerHeight = 1
+  const inputHeight = 3
+  const footerHeight = 1
+  const contentHeight = terminalHeight - headerHeight - inputHeight - footerHeight - 2
 
-  const { scrollOffset, visibleStart, visibleLines, isAtBottom, handleUp, handleDown, resetScroll } =
-    useScroll(allLines, { maxLines: contentHeight });
+  const [input, setInput] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [session, setSession] = useState<Session>(() => {
+    if (resumeSessionId) {
+      const existing = getSession(resumeSessionId)
+      if (existing) return existing
+    }
+    return createSession()
+  })
+  const [scrollOffset, setScrollOffset] = useState(0)
+  const [overlay, setOverlay] = useState<Overlay>('none')
+  const messageCountRef = useRef(0)
 
-  const hasMoreLines = allLines.length > contentHeight;
+  // Load existing messages when resuming a session
+  useEffect(() => {
+    if (resumeSessionId) {
+      const existing = getSessionMessages(resumeSessionId)
+      if (existing.length > 0) {
+        setMessages(existing)
+        messageCountRef.current = existing.length
+      }
+    }
+  }, [resumeSessionId])
+
+  const { isLoading, loadingPos, startLoading, stopLoading } = useLoading()
+  const { isVisible: cursorVisible } = useCursor(isLoading)
+
+  const buffer = useRef('')
+
+  const totalLines = countRenderedLines(messages, terminalWidth)
+  const hasMoreLines = totalLines > contentHeight
+  const isAtBottom = scrollOffset === 0
+
+  const handleUp = useCallback(() => {
+    const maxScroll = Math.max(0, totalLines - contentHeight)
+    setScrollOffset((s) => Math.min(s + 3, maxScroll))
+  }, [totalLines, contentHeight])
+
+  const handleDown = useCallback(() => {
+    setScrollOffset((s) => Math.max(s - 3, 0))
+  }, [])
+
+  const handleExit = useCallback(() => {
+    const hasMessages = messageCountRef.current > 0
+    onExit(session.id, session.created_at, hasMessages)
+  }, [session.id, session.created_at, onExit])
+
+  const handleNewSession = useCallback(() => {
+    const newSession = createSession()
+    setSession(newSession)
+    setMessages([])
+    setScrollOffset(0)
+    messageCountRef.current = 0
+    setOverlay('none')
+  }, [])
+
+  const handleResumeSession = useCallback((sessionId: string) => {
+    if (sessionId === session.id) {
+      setOverlay('none')
+      return
+    }
+    const existing = getSession(sessionId)
+    if (!existing) {
+      setOverlay('none')
+      return
+    }
+    setSession(existing)
+    const existingMessages = getSessionMessages(sessionId)
+    setMessages(existingMessages)
+    messageCountRef.current = existingMessages.length
+    setScrollOffset(0)
+    setOverlay('none')
+  }, [session.id])
+
+  const handleCommandSelect = useCallback((commandId: string) => {
+    switch (commandId) {
+      case 'sessions':
+        setOverlay('sessions')
+        break
+      case 'new-session':
+        handleNewSession()
+        break
+      case 'clear':
+        setMessages([])
+        setScrollOffset(0)
+        setOverlay('none')
+        break
+      case 'exit':
+        handleExit()
+        break
+      default:
+        setOverlay('none')
+    }
+  }, [handleNewSession, handleExit])
 
   useInput((char, key) => {
-    if (key.ctrl && char === "c") exit();
-    if (isLoading) return;
+    // Overlays handle their own input - only intercept ctrl+p and ctrl+c here
+    if (overlay !== 'none') {
+      // Let overlay components handle all input via their own useInput
+      return
+    }
+
+    if (key.ctrl && char === 'c') {
+      handleExit()
+      return
+    }
+
+    if (key.ctrl && char === 'p') {
+      if (!isLoading) {
+        setOverlay('command-palette')
+      }
+      return
+    }
+
+    if (isLoading) return
 
     if (key.return) {
-      if (!input.trim()) return;
+      if (!input.trim()) return
+      if (input.trim().toLowerCase() === 'exit') {
+        handleExit()
+        return
+      }
 
-      if (input.trim().toLowerCase() === "exit") exit();
+      const txt = input
 
-      const txt = input;
+      // Save user message to DB
+      saveMessage(session.id, 'user', txt)
+      messageCountRef.current++
+
+      // Auto-title session from first user message
+      if (messageCountRef.current === 1) {
+        const title = txt.length > 60 ? txt.slice(0, 57) + '...' : txt
+        updateSessionTitle(session.id, title)
+      }
 
       setMessages((m) => [
         ...m,
-        { role: "user", content: txt },
-        { role: "assistant", content: "" },
-      ]);
+        { role: 'user', content: txt },
+        { role: 'assistant', content: '' },
+      ])
 
-      setInput("");
-      resetScroll();
-      startLoading();
-      buffer.current = "";
+      setInput('')
+      setScrollOffset(0)
+      startLoading()
+      buffer.current = ''
 
-      let prompt = txt;
+      // Build full conversation history for context
+      const history: { role: string; content: string }[] = messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
 
-      const asksTime = /\bhora\b|\bque\s*hora\b|\bdime\s*la\s*hora\b/i.test(txt);
-      const asksDate =
-        /\bfecha\b|\bdia\b|\bque\s*dia\b|\bdime\s*la\s*fecha\b|\ba\s*que\s*dia\b/i.test(txt);
+      // Add the new user message (with any tool context injected)
+      let userContent = txt
+
+      const asksTime = /\bhora\b|\bque\s*hora\b|\bdime\s*la\s*hora\b|\btime\b|\bwhat\s*time\b/i.test(txt)
+      const asksDate = /\bfecha\b|\bdia\b|\bque\s*dia\b|\bdate\b|\bwhat\s*day\b/i.test(txt)
 
       if (asksTime && asksDate) {
-        const t = tools.get_time();
-        prompt = `Hora: ${t.time} Fecha: ${t.date}. Responde natural.`;
+        const t = tools.get_time()
+        userContent = `Current time: ${t.time}, date: ${t.date}. The user asked: "${txt}". Answer naturally.`
       } else if (asksDate) {
-        const t = tools.get_time();
-        prompt = `Fecha: ${t.date}. Responde natural.`;
+        const t = tools.get_time()
+        userContent = `Current date: ${t.date}. The user asked: "${txt}". Answer naturally.`
       } else if (asksTime) {
-        const t = tools.get_time();
-        prompt = `Hora: ${t.time}. Responde natural.`;
+        const t = tools.get_time()
+        userContent = `Current time: ${t.time}. The user asked: "${txt}". Answer naturally.`
       }
 
-      streamChat(prompt, (tok) => {
-        buffer.current += tok;
+      history.push({ role: 'user', content: userContent })
 
+      streamChat('', (tok) => {
+        buffer.current += tok
         setMessages((m) => {
-          const copy = [...m];
-          const last = copy[copy.length - 1];
-          if (last?.role === "assistant") {
-            last.content = buffer.current;
+          const copy = [...m]
+          const last = copy[copy.length - 1]
+          if (last?.role === 'assistant') {
+            last.content = buffer.current
           }
-          return copy;
-        });
-      }).then(() => {
-        stopLoading();
-        buffer.current = "";
-      });
+          return copy
+        })
+      }, history).then(() => {
+        if (buffer.current) {
+          saveMessage(session.id, 'assistant', buffer.current)
+          messageCountRef.current++
+        }
+        stopLoading()
+        buffer.current = ''
+      }).catch(() => {
+        const errorMsg = 'Error: Could not connect to Ollama. Is it running on localhost:11434?'
+        buffer.current = ''
+        setMessages((m) => {
+          const copy = [...m]
+          const last = copy[copy.length - 1]
+          if (last?.role === 'assistant') {
+            last.content = errorMsg
+          }
+          return copy
+        })
+        saveMessage(session.id, 'assistant', errorMsg)
+        messageCountRef.current++
+        stopLoading()
+      })
 
-      return;
+      return
     }
 
     if (key.upArrow) {
-      handleUp();
-      return;
+      handleUp()
+      return
     }
-
     if (key.downArrow) {
-      handleDown();
-      return;
+      handleDown()
+      return
     }
-
     if (key.backspace) {
-      setInput((s) => s.slice(0, -1));
-      return;
+      setInput((s) => s.slice(0, -1))
+      return
     }
-
     if (char) {
-      setInput((s) => s + char);
+      setInput((s) => s + char)
     }
-  });
+  })
+
+  // Render overlay on top of chat
+  if (overlay === 'command-palette') {
+    return (
+      <CommandPalette
+        commands={COMMANDS}
+        onSelect={handleCommandSelect}
+        onClose={() => setOverlay('none')}
+      />
+    )
+  }
+
+  if (overlay === 'sessions') {
+    return (
+      <SessionList
+        currentSessionId={session.id}
+        onSelect={handleResumeSession}
+        onClose={() => setOverlay('none')}
+      />
+    )
+  }
 
   return (
-    <Box flexDirection="column" height={process.stdout?.rows || 24}>
-      <MessageList lines={allLines} visibleStart={visibleStart} />
+    <Box flexDirection="column" height={terminalHeight}>
+      <Header model={MODEL} sessionId={session.id} />
+
+      <Box height={1} paddingX={1}>
+        <Text color="gray">{'─'.repeat(Math.max(0, terminalWidth - 4))}</Text>
+      </Box>
+
+      <MessageList
+        messages={messages}
+        visibleStart={scrollOffset}
+        visibleCount={contentHeight}
+        terminalWidth={terminalWidth}
+      />
 
       <Input
         value={input}
@@ -134,9 +324,68 @@ export function App() {
         scrollOffset={scrollOffset}
       />
     </Box>
-  );
+  )
 }
 
-export function runTUI() {
-  render(<App />);
+interface AppProps {
+  resumeSessionId?: string
+}
+
+export function App({ resumeSessionId }: AppProps) {
+  const { exit } = useApp()
+  const [phase, setPhase] = useState<'splash' | 'chat' | 'goodbye'>('splash')
+  const [exitInfo, setExitInfo] = useState({
+    sessionId: '',
+    sessionDate: '',
+    hasMessages: false,
+  })
+
+  const handleChatExit = useCallback((
+    sessionId: string,
+    sessionDate: string,
+    hasMessages: boolean,
+  ) => {
+    if (!hasMessages) {
+      closeDb()
+      exit()
+      return
+    }
+    setExitInfo({ sessionId, sessionDate, hasMessages })
+    setPhase('goodbye')
+  }, [exit])
+
+  // Auto-exit after showing goodbye screen
+  useEffect(() => {
+    if (phase !== 'goodbye') return
+    const timer = setTimeout(() => {
+      closeDb()
+      exit()
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [phase, exit])
+
+  if (phase === 'splash') {
+    return <Splash onDone={() => setPhase('chat')} />
+  }
+
+  if (phase === 'goodbye') {
+    return (
+      <Goodbye
+        sessionId={exitInfo.sessionId}
+        sessionDate={exitInfo.sessionDate}
+        hasMessages={exitInfo.hasMessages}
+      />
+    )
+  }
+
+  return (
+    <Chat
+      resumeSessionId={resumeSessionId}
+      onExit={handleChatExit}
+    />
+  )
+}
+
+export function runTUI(resumeSessionId?: string): void {
+  render(<App resumeSessionId={resumeSessionId} />)
 }

@@ -1,0 +1,53 @@
+import Database from 'better-sqlite3'
+import path from 'path'
+import os from 'os'
+import fs from 'fs'
+
+const DATA_DIR = path.join(os.homedir(), '.null-cli')
+const DB_PATH = path.join(DATA_DIR, 'null.db')
+
+let db: Database.Database | null = null
+
+export function getDb(): Database.Database {
+  if (db) return db
+
+  // Ensure data directory exists
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true })
+  }
+
+  db = new Database(DB_PATH)
+
+  // Enable WAL mode for better concurrent performance
+  db.pragma('journal_mode = WAL')
+
+  // Create tables
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+  `)
+
+  return db
+}
+
+export function closeDb(): void {
+  if (db) {
+    db.close()
+    db = null
+  }
+}
