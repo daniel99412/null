@@ -167,6 +167,9 @@ export function SessionList({ onSelect, onClose, currentSessionId }: SessionList
                   {isCurrent ? (
                     <Text color="green" dimColor> current </Text>
                   ) : null}
+                  {session.status === 'archived' ? (
+                    <Text color="yellow" dimColor> archived </Text>
+                  ) : null}
                   <Text color="gray" dimColor>{formatDate(session.updated_at)}</Text>
                 </Box>
               </Box>

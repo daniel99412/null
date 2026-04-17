@@ -20,9 +20,12 @@ import {
   getSessionMessages,
   saveMessage,
   updateSessionTitle,
+  getSummary,
+  reactivateSession,
   closeDb,
 } from '../memory/sessions.js'
 import type { Session } from '../memory/sessions.js'
+import { runCleanup } from '../memory/cleanup.js'
 import type { SearchContext } from '../tools/web-search.js'
 
 const MODEL = 'qwen2.5-coder:7b'
@@ -68,10 +71,21 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   // Load existing messages when resuming a session
   useEffect(() => {
     if (resumeSessionId) {
-      const existing = getSessionMessages(resumeSessionId)
-      if (existing.length > 0) {
-        setMessages(existing)
-        messageCountRef.current = existing.length
+      const s = getSession(resumeSessionId)
+      if (s && s.status === 'archived') {
+        // Archived session: show recall message
+        reactivateSession(resumeSessionId)
+        const summary = getSummary(resumeSessionId)
+        if (summary) {
+          setMessages([{ role: 'recall', content: summary.summary }])
+        }
+        messageCountRef.current = 0
+      } else {
+        const existing = getSessionMessages(resumeSessionId)
+        if (existing.length > 0) {
+          setMessages(existing)
+          messageCountRef.current = existing.length
+        }
       }
     }
   }, [resumeSessionId])
@@ -118,10 +132,32 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       setOverlay('none')
       return
     }
-    setSession(existing)
-    const existingMessages = getSessionMessages(sessionId)
-    setMessages(existingMessages)
-    messageCountRef.current = existingMessages.length
+
+    // If archived, reactivate and show recall message with summary
+    if (existing.status === 'archived') {
+      const summary = getSummary(sessionId)
+      reactivateSession(sessionId)
+      const reactivated = getSession(sessionId)
+      if (reactivated) setSession(reactivated)
+
+      if (summary) {
+        const recallMessage: ChatMessage = {
+          role: 'recall',
+          content: summary.summary,
+        }
+        setMessages([recallMessage])
+        messageCountRef.current = 0
+      } else {
+        setMessages([])
+        messageCountRef.current = 0
+      }
+    } else {
+      setSession(existing)
+      const existingMessages = getSessionMessages(sessionId)
+      setMessages(existingMessages)
+      messageCountRef.current = existingMessages.length
+    }
+
     setScrollOffset(0)
     setOverlay('none')
   }, [session.id])
@@ -216,11 +252,18 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
       // Build the send function (may be async due to web search)
       const sendToLLM = async (): Promise<void> => {
-        // Build full conversation history
-        const history: { role: string; content: string }[] = messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }))
+        // Build full conversation history, converting recall messages to system context
+        const history: { role: string; content: string }[] = messages
+          .filter((m) => m.role !== 'recall' || m.content.trim().length > 0)
+          .map((m) => {
+            if (m.role === 'recall') {
+              return {
+                role: 'system',
+                content: `[Recall — summary of a previous conversation in this session]\n${m.content}\n\nUse this context if relevant to what the user asks next.`,
+              }
+            }
+            return { role: m.role, content: m.content }
+          })
 
         let userContent = txt
 
@@ -402,6 +445,8 @@ export function App({ resumeSessionId }: AppProps) {
       exit()
       return
     }
+    // Leave alternate screen so goodbye is visible on the primary screen
+    process.stdout.write('\x1b[?1049l')
     setExitInfo({ sessionId, sessionDate, hasMessages })
     setPhase('goodbye')
   }, [exit])
@@ -416,8 +461,14 @@ export function App({ resumeSessionId }: AppProps) {
     return () => clearTimeout(timer)
   }, [phase, exit])
 
+  const handleSplashDone = useCallback(() => {
+    setPhase('chat')
+    // Run cleanup in background — don't block the UI
+    runCleanup().catch(() => { /* silently ignore cleanup errors */ })
+  }, [])
+
   if (phase === 'splash') {
-    return <Splash onDone={() => setPhase('chat')} />
+    return <Splash onDone={handleSplashDone} />
   }
 
   if (phase === 'goodbye') {

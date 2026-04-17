@@ -2,7 +2,7 @@ import React from 'react'
 import { Box, Text } from 'ink'
 
 export interface ChatMessage {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'recall'
   content: string
 }
 
@@ -41,7 +41,7 @@ export function MessageList({
   // Build all rendered lines with their styling info
   interface RenderLine {
     text: string
-    role: 'user' | 'assistant'
+    role: 'user' | 'assistant' | 'recall'
     isLabel: boolean
     isSeparator: boolean
   }
@@ -55,7 +55,7 @@ export function MessageList({
     }
 
     // Role label
-    const label = msg.role === 'user' ? '> You' : '> null'
+    const label = msg.role === 'user' ? '> You' : msg.role === 'recall' ? '> recall' : '> null'
     allLines.push({ text: label, role: msg.role, isLabel: true, isSeparator: false })
 
     // Content lines
@@ -84,14 +84,15 @@ export function MessageList({
           return <Text key={start + i} color="gray">{' '}</Text>
         }
         if (line.isLabel) {
+          const color = line.role === 'user' ? 'cyan' : line.role === 'recall' ? 'yellow' : 'green'
           return (
-            <Text key={start + i} color={line.role === 'user' ? 'cyan' : 'green'} bold>
+            <Text key={start + i} color={color} bold>
               {line.text}
             </Text>
           )
         }
         return (
-          <Text key={start + i} color="white">
+          <Text key={start + i} color={line.role === 'recall' ? 'yellowBright' : 'white'}>
             {'  '}{line.text}
           </Text>
         )
