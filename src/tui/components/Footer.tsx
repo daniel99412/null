@@ -1,6 +1,7 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import { renderLoadingBar } from '../utils/loading.js'
+import { useTheme } from '../context/ThemeContext.js'
 
 interface FooterProps {
   isLoading: boolean
@@ -17,11 +18,13 @@ export function Footer({
   hasMoreLines,
   scrollOffset,
 }: FooterProps) {
+  const { accent } = useTheme()
+
   return (
     <Box height={1} paddingX={1} justifyContent="space-between">
       <Box>
         {isLoading ? (
-          <Text color="cyan">{renderLoadingBar(loadingPos)}</Text>
+          <Text color={accent}>{renderLoadingBar(loadingPos)}</Text>
         ) : (
           <Text color="gray">null v0.1.0</Text>
         )}

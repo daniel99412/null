@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { listSessions, deleteSession } from '../../memory/sessions.js'
 import type { Session } from '../../memory/sessions.js'
+import { useTheme } from '../context/ThemeContext.js'
 
 interface SessionListProps {
   onSelect: (sessionId: string) => void
@@ -30,6 +31,7 @@ function truncate(str: string, max: number): string {
 }
 
 export function SessionList({ onSelect, onClose, currentSessionId }: SessionListProps) {
+  const { accent } = useTheme()
   const [sessions, setSessions] = useState<Session[]>(() => listSessions(20))
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filter, setFilter] = useState('')
@@ -117,20 +119,20 @@ export function SessionList({ onSelect, onClose, currentSessionId }: SessionList
         flexDirection="column"
         width={paletteWidth}
         borderStyle="round"
-        borderColor="cyan"
+        borderColor={accent}
         paddingX={1}
       >
         {/* Title */}
         <Box marginBottom={1}>
-          <Text color="cyan" bold>Sessions</Text>
+          <Text color={accent} bold>Sessions</Text>
           <Text color="gray"> ({sessions.length} total)</Text>
         </Box>
 
         {/* Search */}
         <Box>
-          <Text color="cyan" bold>{'> '}</Text>
+          <Text color={accent} bold>{'> '}</Text>
           <Text color="white">{filter}</Text>
-          <Text color="cyan" inverse>{' '}</Text>
+          <Text color={accent} inverse>{' '}</Text>
           {!filter && <Text color="gray"> Filter sessions...</Text>}
         </Box>
 
@@ -154,7 +156,7 @@ export function SessionList({ onSelect, onClose, currentSessionId }: SessionList
               <Box key={session.id} paddingX={1} justifyContent="space-between">
                 <Box>
                   <Text
-                    color={isSelected ? 'cyan' : isCurrent ? 'green' : 'white'}
+                    color={isSelected ? accent : isCurrent ? 'green' : 'white'}
                     bold={isSelected}
                     inverse={isSelected}
                   >

@@ -10,10 +10,12 @@ import { MessageList, countRenderedLines } from './components/MessageList.js'
 import type { ChatMessage } from './components/MessageList.js'
 import { Input } from './components/Input.js'
 import { Footer } from './components/Footer.js'
-import { Goodbye } from './components/Goodbye.js'
+import { printGoodbye } from './components/Goodbye.js'
 import { CommandPalette } from './components/CommandPalette.js'
 import type { CommandItem } from './components/CommandPalette.js'
 import { SessionList } from './components/SessionList.js'
+import { ColorPicker } from './components/ColorPicker.js'
+import { ThemeProvider, useTheme } from './context/ThemeContext.js'
 import {
   createSession,
   getSession,
@@ -26,6 +28,8 @@ import {
 } from '../memory/sessions.js'
 import type { Session } from '../memory/sessions.js'
 import { runCleanup } from '../memory/cleanup.js'
+import { routeQuery } from '../core/router.js'
+import { getCachedSearch, setCachedSearch } from '../memory/search-cache.js'
 import type { SearchContext } from '../tools/web-search.js'
 
 const MODEL = 'qwen2.5-coder:7b'
@@ -34,11 +38,161 @@ const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
   { id: 'new-session', label: 'New Session', description: 'Start a fresh conversation', shortcut: '' },
   { id: 'search', label: 'Search Web', description: 'Search the web and ask about the results', shortcut: '/search' },
+  { id: 'theme', label: 'Theme', description: 'Change the accent color of the UI', shortcut: '' },
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
-type Overlay = 'none' | 'command-palette' | 'sessions'
+type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker'
+
+interface SearchPipelineResult {
+  contextMessage: string
+  originalTxt: string
+}
+
+interface FetchedArticle {
+  title: string
+  url: string
+  content: string
+}
+
+/**
+ * Debug log to stderr (doesn't interfere with TUI).
+ */
+function debugLog(msg: string): void {
+  process.stderr.write(`[null-debug] ${msg}\n`)
+}
+
+/**
+ * Fetch multiple pages in parallel, returning structured articles.
+ */
+async function fetchArticles(
+  results: { title: string; url: string; snippet: string }[],
+  maxArticles: number = 5,
+): Promise<FetchedArticle[]> {
+  const toFetch = results.slice(0, maxArticles)
+
+  const settled = await Promise.allSettled(
+    toFetch.map(async (r) => {
+      const text = await tools.web_fetch(r.url)
+      return {
+        title: r.title,
+        url: r.url,
+        content: text && text.length > 100 ? text : r.snippet,
+      }
+    }),
+  )
+
+  const articles: FetchedArticle[] = []
+  for (let i = 0; i < settled.length; i++) {
+    const result = settled[i]
+    if (result.status === 'fulfilled') {
+      articles.push(result.value)
+      debugLog(`  ✓ Fetched: ${toFetch[i].title}`)
+    } else {
+      // Use snippet as fallback
+      articles.push({
+        title: toFetch[i].title,
+        url: toFetch[i].url,
+        content: toFetch[i].snippet,
+      })
+      debugLog(`  ✗ Failed, using snippet: ${toFetch[i].title}`)
+    }
+  }
+
+  return articles
+}
+
+/**
+ * Build a factual context message from fetched articles.
+ * Structured as a numbered dictionary so the LLM can summarize each one.
+ */
+function buildArticleContext(
+  articles: FetchedArticle[],
+  query: string,
+  wikiExtract?: string | null,
+): string {
+  const now = new Date()
+  const systemLocale = Intl.DateTimeFormat().resolvedOptions()
+  const todayStr = now.toLocaleDateString(systemLocale.locale, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: systemLocale.timeZone,
+  })
+
+  const parts = [
+    `Today is ${todayStr}.`,
+    `The following are ${articles.length} current articles/sources about "${query}".`,
+    `Read each one and use the information to answer the user's question.`,
+    '',
+  ]
+
+  if (wikiExtract) {
+    parts.push('--- Background ---')
+    parts.push(wikiExtract)
+    parts.push('')
+  }
+
+  for (let i = 0; i < articles.length; i++) {
+    const a = articles[i]
+    parts.push(`--- Article ${i + 1}: ${a.title} ---`)
+    parts.push(`Source: ${a.url}`)
+    // Truncate each article to ~3000 chars to fit context window
+    parts.push(a.content.slice(0, 3000))
+    parts.push('')
+  }
+
+  parts.push('INSTRUCTIONS: You have all the information needed to answer. Summarize each article with specific details (names, scores, dates, numbers). Include source URLs. DO NOT say you cannot access the internet. DO NOT tell the user to visit websites instead — give them the answer directly. Respond in the same language the user writes in.')
+
+  return parts.join('\n')
+}
+
+/**
+ * Full search pipeline: search DDG → fetch top 5 pages → build structured context.
+ * Uses cache to avoid redundant calls.
+ * Returns null if search fails or yields no results.
+ */
+async function performSearch(query: string, originalTxt: string): Promise<SearchPipelineResult | null> {
+  try {
+    debugLog(`Router triggered webSearch for: "${query}"`)
+
+    // Check cache first
+    const cached = getCachedSearch(query)
+    let searchCtx: SearchContext
+
+    if (cached) {
+      debugLog('Using cached search results')
+      searchCtx = cached
+    } else {
+      // Fetch from DuckDuckGo
+      searchCtx = await tools.web_search(query)
+      debugLog(`DDG returned ${searchCtx.results.length} results, extract: ${searchCtx.extract ? 'yes' : 'no'}`)
+
+      if (searchCtx.results.length === 0 && !searchCtx.extract) {
+        debugLog('No search results found')
+        return null
+      }
+
+      // Cache the result (5 min TTL)
+      setCachedSearch(query, searchCtx, 300)
+    }
+
+    // Fetch top 5 pages in parallel
+    debugLog(`Fetching top ${Math.min(searchCtx.results.length, 5)} pages...`)
+    const articles = await fetchArticles(searchCtx.results, 5)
+    debugLog(`Got ${articles.length} articles`)
+
+    const contextMessage = buildArticleContext(articles, query, searchCtx.extract)
+    debugLog(`Context message length: ${contextMessage.length} chars`)
+
+    return { contextMessage, originalTxt }
+  } catch (err) {
+    debugLog(`Search pipeline error: ${err}`)
+  }
+  return null
+}
 
 interface ChatProps {
   resumeSessionId?: string
@@ -57,6 +211,16 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const messagesRef = useRef<ChatMessage[]>([])
+
+  // Keep ref in sync with state
+  const updateMessages = useCallback((updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    setMessages((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      messagesRef.current = next
+      return next
+    })
+  }, [])
   const [session, setSession] = useState<Session>(() => {
     if (resumeSessionId) {
       const existing = getSession(resumeSessionId)
@@ -77,13 +241,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         reactivateSession(resumeSessionId)
         const summary = getSummary(resumeSessionId)
         if (summary) {
-          setMessages([{ role: 'recall', content: summary.summary }])
+          updateMessages([{ role: 'recall', content: summary.summary }])
         }
         messageCountRef.current = 0
       } else {
         const existing = getSessionMessages(resumeSessionId)
         if (existing.length > 0) {
-          setMessages(existing)
+          updateMessages(existing)
           messageCountRef.current = existing.length
         }
       }
@@ -116,7 +280,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const handleNewSession = useCallback(() => {
     const newSession = createSession()
     setSession(newSession)
-    setMessages([])
+    updateMessages([])
     setScrollOffset(0)
     messageCountRef.current = 0
     setOverlay('none')
@@ -145,24 +309,22 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           role: 'recall',
           content: summary.summary,
         }
-        setMessages([recallMessage])
+        updateMessages([recallMessage])
         messageCountRef.current = 0
       } else {
-        setMessages([])
+        updateMessages([])
         messageCountRef.current = 0
       }
     } else {
       setSession(existing)
       const existingMessages = getSessionMessages(sessionId)
-      setMessages(existingMessages)
+      updateMessages(existingMessages)
       messageCountRef.current = existingMessages.length
     }
 
     setScrollOffset(0)
     setOverlay('none')
   }, [session.id])
-
-  const searchPendingRef = useRef(false)
 
   const handleCommandSelect = useCallback((commandId: string) => {
     switch (commandId) {
@@ -178,9 +340,12 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         setInput('/search ')
         break
       case 'clear':
-        setMessages([])
+        updateMessages([])
         setScrollOffset(0)
         setOverlay('none')
+        break
+      case 'theme':
+        setOverlay('color-picker')
         break
       case 'exit':
         handleExit()
@@ -230,7 +395,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         updateSessionTitle(session.id, title)
       }
 
-      setMessages((m) => [
+      updateMessages((m) => [
         ...m,
         { role: 'user', content: txt },
         { role: 'assistant', content: '' },
@@ -241,20 +406,15 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       startLoading()
       buffer.current = ''
 
-      // Determine if this is a web search request
-      const isExplicitSearch = /^\/search\s+/i.test(txt)
-      const isSearchIntent = /\b(search|busca|buscar|look\s*up|google|wiki|find\s+(me|out|info)|what\s+is|what\s+are|who\s+is|who\s+are|when\s+(is|was|did)|where\s+(is|are)|how\s+(much|many|does|do|did|is)|tell\s+me\s+about|know\s+(about|something)|heard\s+(about|of)|anything\s+about|what\s+happened|latest\s+news|latest|recent|current|news\s+about|on\s+the\s+web|from\s+the\s+internet|online)\b/i.test(txt)
-      const needsSearch = isExplicitSearch || isSearchIntent
-
-      const searchQuery = isExplicitSearch
-        ? txt.replace(/^\/search\s+/i, '').trim()
-        : txt
-
-      // Build the send function (may be async due to web search)
       const sendToLLM = async (): Promise<void> => {
-        // Build full conversation history, converting recall messages to system context
-        const history: { role: string; content: string }[] = messages
-          .filter((m) => m.role !== 'recall' || m.content.trim().length > 0)
+        const history: { role: string; content: string }[] = messagesRef.current
+          .filter((m) => {
+            // Skip empty assistant messages (placeholders)
+            if (m.role === 'assistant' && !m.content.trim()) return false
+            // Skip empty recall messages
+            if (m.role === 'recall' && !m.content.trim()) return false
+            return true
+          })
           .map((m) => {
             if (m.role === 'recall') {
               return {
@@ -266,56 +426,78 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           })
 
         let userContent = txt
+        let searchContext: string | null = null
 
-        // Web search: fetch context and inject into the prompt
-        if (needsSearch) {
-          try {
-            const searchCtx: SearchContext = await tools.web_search(searchQuery)
+        // Route the query to determine what action to take
+        const isExplicitSearch = /^\/search\s+/i.test(txt)
+        const searchQuery = isExplicitSearch
+          ? txt.replace(/^\/search\s+/i, '').trim()
+          : txt
 
-            if (searchCtx.extract || searchCtx.results.length > 0) {
-              const resultsText = searchCtx.results
-                .map((r, i) => `${i + 1}. ${r.title}: ${r.snippet}`)
-                .join('\n')
+        if (isExplicitSearch) {
+          // Explicit /search command — always search
+          updateMessages((m) => {
+            const copy = [...m]
+            const last = copy[copy.length - 1]
+            if (last?.role === 'assistant') last.content = '🔍 Searching the web...'
+            return copy
+          })
 
-              userContent = [
-                `[Web Search Results for "${searchQuery}"]`,
-                '',
-                searchCtx.extract ? `Summary: ${searchCtx.extract}` : '',
-                '',
-                resultsText ? `Other results:\n${resultsText}` : '',
-                '',
-                `User's original question: "${txt}"`,
-                '',
-                'Based on the search results above, provide a helpful and accurate answer. Cite sources when relevant.',
-              ].filter(Boolean).join('\n')
+          const result = await performSearch(searchQuery, txt)
+          if (result) {
+            searchContext = result.contextMessage
+            userContent = searchQuery
+          }
+
+          updateMessages((m) => {
+            const copy = [...m]
+            const last = copy[copy.length - 1]
+            if (last?.role === 'assistant') last.content = ''
+            return copy
+          })
+        } else {
+          // Use the router to decide
+          const routerResult = await routeQuery(txt)
+          const { decision } = routerResult
+          debugLog(`Router decision: ${decision} (source: ${routerResult.source}, confidence: ${routerResult.confidence})`)
+
+          if (decision === 'getDateTime') {
+            const t = tools.get_time()
+            userContent = `Current time: ${t.time}, date: ${t.date}. User asked: "${txt}". Answer naturally.`
+
+          } else if (decision === 'webSearch') {
+            updateMessages((m) => {
+              const copy = [...m]
+              const last = copy[copy.length - 1]
+              if (last?.role === 'assistant') last.content = '🔍 Searching the web...'
+              return copy
+            })
+
+            const result = await performSearch(searchQuery, txt)
+            if (result) {
+              searchContext = result.contextMessage
+              userContent = txt
             }
-          } catch {
-            // Search failed, fall through to normal prompt
+
+            updateMessages((m) => {
+              const copy = [...m]
+              const last = copy[copy.length - 1]
+              if (last?.role === 'assistant') last.content = ''
+              return copy
+            })
           }
+          // else: decision === 'none' → userContent stays as txt
         }
 
-        // Time/date tool injection (only if not a search)
-        if (!needsSearch) {
-          const asksTime = /\bhora\b|\bque\s*hora\b|\bdime\s*la\s*hora\b|\btime\b|\bwhat\s*time\b/i.test(txt)
-          const asksDate = /\bfecha\b|\bdia\b|\bque\s*dia\b|\bdate\b|\bwhat\s*day\b/i.test(txt)
-
-          if (asksTime && asksDate) {
-            const t = tools.get_time()
-            userContent = `Current time: ${t.time}, date: ${t.date}. The user asked: "${txt}". Answer naturally.`
-          } else if (asksDate) {
-            const t = tools.get_time()
-            userContent = `Current date: ${t.date}. The user asked: "${txt}". Answer naturally.`
-          } else if (asksTime) {
-            const t = tools.get_time()
-            userContent = `Current time: ${t.time}. The user asked: "${txt}". Answer naturally.`
-          }
+        // Inject search context as a system message before the user message
+        if (searchContext) {
+          history.push({ role: 'system', content: searchContext })
         }
-
         history.push({ role: 'user', content: userContent })
 
         await streamChat('', (tok) => {
           buffer.current += tok
-          setMessages((m) => {
+          updateMessages((m) => {
             const copy = [...m]
             const last = copy[copy.length - 1]
             if (last?.role === 'assistant') {
@@ -336,7 +518,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       }).catch(() => {
         const errorMsg = 'Error: Could not connect to Ollama. Is it running on localhost:11434?'
         buffer.current = ''
-        setMessages((m) => {
+        updateMessages((m) => {
           const copy = [...m]
           const last = copy[copy.length - 1]
           if (last?.role === 'assistant') {
@@ -361,7 +543,26 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
     if (key.backspace) {
-      setInput((s) => s.slice(0, -1))
+      if (key.ctrl || key.meta) {
+        // Ctrl+Backspace / Option+Backspace: delete previous word
+        setInput((s) => {
+          const trimmed = s.replace(/\s+$/, '')
+          const lastSpace = trimmed.lastIndexOf(' ')
+          return lastSpace === -1 ? '' : s.slice(0, lastSpace + 1)
+        })
+      } else {
+        setInput((s) => s.slice(0, -1))
+      }
+      return
+    }
+
+    // Ctrl+W: delete previous word (Unix standard)
+    if (key.ctrl && char === 'w') {
+      setInput((s) => {
+        const trimmed = s.replace(/\s+$/, '')
+        const lastSpace = trimmed.lastIndexOf(' ')
+        return lastSpace === -1 ? '' : s.slice(0, lastSpace + 1)
+      })
       return
     }
     if (char) {
@@ -385,6 +586,14 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       <SessionList
         currentSessionId={session.id}
         onSelect={handleResumeSession}
+        onClose={() => setOverlay('none')}
+      />
+    )
+  }
+
+  if (overlay === 'color-picker') {
+    return (
+      <ColorPicker
         onClose={() => setOverlay('none')}
       />
     )
@@ -422,73 +631,51 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   )
 }
 
-interface AppProps {
-  resumeSessionId?: string
-}
+export function runTUI(resumeSessionId?: string): void {
+  const exitInfoRef = { current: { sessionId: '', sessionDate: '', hasMessages: false } }
 
-export function App({ resumeSessionId }: AppProps) {
-  const { exit } = useApp()
-  const [phase, setPhase] = useState<'splash' | 'chat' | 'goodbye'>('splash')
-  const [exitInfo, setExitInfo] = useState({
-    sessionId: '',
-    sessionDate: '',
-    hasMessages: false,
-  })
+  const InnerApp = () => {
+    const { exit } = useApp()
+    const [phase, setPhase] = useState<'splash' | 'chat'>('splash')
 
-  const handleChatExit = useCallback((
-    sessionId: string,
-    sessionDate: string,
-    hasMessages: boolean,
-  ) => {
-    if (!hasMessages) {
+    const handleChatExit = useCallback((
+      sessionId: string,
+      sessionDate: string,
+      hasMessages: boolean,
+    ) => {
+      exitInfoRef.current = { sessionId, sessionDate, hasMessages }
       closeDb()
       exit()
-      return
+    }, [exit])
+
+    const handleSplashDone = useCallback(() => {
+      setPhase('chat')
+      runCleanup().catch(() => {})
+    }, [])
+
+    if (phase === 'splash') {
+      return <Splash onDone={handleSplashDone} />
     }
-    // Leave alternate screen so goodbye is visible on the primary screen
-    process.stdout.write('\x1b[?1049l')
-    setExitInfo({ sessionId, sessionDate, hasMessages })
-    setPhase('goodbye')
-  }, [exit])
 
-  // Auto-exit after showing goodbye screen
-  useEffect(() => {
-    if (phase !== 'goodbye') return
-    const timer = setTimeout(() => {
-      closeDb()
-      exit()
-    }, 3000)
-    return () => clearTimeout(timer)
-  }, [phase, exit])
-
-  const handleSplashDone = useCallback(() => {
-    setPhase('chat')
-    // Run cleanup in background — don't block the UI
-    runCleanup().catch(() => { /* silently ignore cleanup errors */ })
-  }, [])
-
-  if (phase === 'splash') {
-    return <Splash onDone={handleSplashDone} />
-  }
-
-  if (phase === 'goodbye') {
     return (
-      <Goodbye
-        sessionId={exitInfo.sessionId}
-        sessionDate={exitInfo.sessionDate}
-        hasMessages={exitInfo.hasMessages}
+      <Chat
+        resumeSessionId={resumeSessionId}
+        onExit={handleChatExit}
       />
     )
   }
 
-  return (
-    <Chat
-      resumeSessionId={resumeSessionId}
-      onExit={handleChatExit}
-    />
+  const instance = render(
+    <ThemeProvider>
+      <InnerApp />
+    </ThemeProvider>,
+    { alternateScreen: true },
   )
-}
 
-export function runTUI(resumeSessionId?: string): void {
-  render(<App resumeSessionId={resumeSessionId} />, { alternateScreen: true })
+  instance.waitUntilExit().then(() => {
+    const info = exitInfoRef.current
+    if (info.hasMessages) {
+      printGoodbye(info)
+    }
+  })
 }

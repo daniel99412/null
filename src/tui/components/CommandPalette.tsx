@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { Box, Text, useInput } from 'ink'
+import { useTheme } from '../context/ThemeContext.js'
 
 export interface CommandItem {
   id: string
@@ -15,6 +16,7 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ commands, onSelect, onClose }: CommandPaletteProps) {
+  const { accent } = useTheme()
   const [filter, setFilter] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
 
@@ -28,7 +30,6 @@ export function CommandPalette({ commands, onSelect, onClose }: CommandPalettePr
     )
   }, [commands, filter])
 
-  // Clamp selection when filter changes
   const clamped = Math.min(selectedIndex, Math.max(0, filtered.length - 1))
   if (clamped !== selectedIndex) {
     setSelectedIndex(clamped)
@@ -75,7 +76,6 @@ export function CommandPalette({ commands, onSelect, onClose }: CommandPalettePr
   const paletteWidth = Math.min(60, cols - 4)
   const maxItems = Math.min(filtered.length, rows - 8)
 
-  // Calculate visible window for scrolling
   const windowStart = Math.max(0, selectedIndex - maxItems + 1)
   const visibleItems = filtered.slice(windowStart, windowStart + maxItems)
   const visibleStartIndex = windowStart
@@ -92,14 +92,14 @@ export function CommandPalette({ commands, onSelect, onClose }: CommandPalettePr
         flexDirection="column"
         width={paletteWidth}
         borderStyle="round"
-        borderColor="cyan"
+        borderColor={accent}
         paddingX={1}
       >
         {/* Search input */}
         <Box marginBottom={1}>
-          <Text color="cyan" bold>{'> '}</Text>
+          <Text color={accent} bold>{'> '}</Text>
           <Text color="white">{filter}</Text>
-          <Text color="cyan" inverse>{' '}</Text>
+          <Text color={accent} inverse>{' '}</Text>
           {!filter && <Text color="gray"> Search commands...</Text>}
         </Box>
 
@@ -121,7 +121,7 @@ export function CommandPalette({ commands, onSelect, onClose }: CommandPalettePr
               <Box key={cmd.id} paddingX={1}>
                 <Box flexGrow={1}>
                   <Text
-                    color={isSelected ? 'cyan' : 'white'}
+                    color={isSelected ? accent : 'white'}
                     bold={isSelected}
                     inverse={isSelected}
                   >

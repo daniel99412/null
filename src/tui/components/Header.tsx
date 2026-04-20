@@ -1,5 +1,6 @@
 import React from 'react'
 import { Box, Text } from 'ink'
+import { useTheme } from '../context/ThemeContext.js'
 
 interface HeaderProps {
   model: string
@@ -7,6 +8,7 @@ interface HeaderProps {
 }
 
 export function Header({ model, sessionId }: HeaderProps) {
+  const { accent } = useTheme()
   const cols = process.stdout?.columns || 80
 
   return (
@@ -17,7 +19,7 @@ export function Header({ model, sessionId }: HeaderProps) {
       justifyContent="space-between"
     >
       <Box>
-        <Text color="cyan" bold>null</Text>
+        <Text color={accent} bold>null</Text>
         <Text color="gray"> | </Text>
         <Text color="white">{model}</Text>
       </Box>

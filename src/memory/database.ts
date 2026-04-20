@@ -49,6 +49,14 @@ export function getDb(): Database.Database {
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS search_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      query_key TEXT NOT NULL UNIQUE,
+      result TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      ttl_seconds INTEGER NOT NULL DEFAULT 300
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_session_summaries_session_id ON session_summaries(session_id);
   `)

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Box, Text } from 'ink'
 import figlet from 'figlet'
+import { useTheme } from '../context/ThemeContext.js'
 
 const LOGO = figlet.textSync('null', {
   font: 'ANSI Shadow',
@@ -17,11 +18,11 @@ interface SplashProps {
 }
 
 export function Splash({ onDone }: SplashProps) {
+  const { accent } = useTheme()
   const [charIndex, setCharIndex] = useState(0)
   const [showTagline, setShowTagline] = useState(false)
   const [fadeOut, setFadeOut] = useState(false)
 
-  // Typewriter effect - reveal characters progressively
   useEffect(() => {
     if (charIndex >= TOTAL_CHARS) {
       const taglineTimer = setTimeout(() => setShowTagline(true), 200)
@@ -34,14 +35,12 @@ export function Splash({ onDone }: SplashProps) {
     return () => clearTimeout(timer)
   }, [charIndex])
 
-  // After tagline shows, wait then fade
   useEffect(() => {
     if (!showTagline) return
     const timer = setTimeout(() => setFadeOut(true), 600)
     return () => clearTimeout(timer)
   }, [showTagline])
 
-  // Fade out then transition
   useEffect(() => {
     if (!fadeOut) return
     const timer = setTimeout(onDone, 300)
@@ -51,7 +50,6 @@ export function Splash({ onDone }: SplashProps) {
   const rows = process.stdout?.rows || 24
   const topPad = Math.max(0, Math.floor((rows - LOGO_LINES.length - 4) / 2))
 
-  // Build the revealed text
   const revealed = LOGO.slice(0, charIndex)
   const revealedLines = revealed.split('\n')
 
@@ -60,7 +58,7 @@ export function Splash({ onDone }: SplashProps) {
       <Box height={topPad} />
       <Box flexDirection="column" alignItems="center">
         {LOGO_LINES.map((_, i) => (
-          <Text key={i} color={fadeOut ? 'gray' : 'cyan'} bold dimColor={fadeOut}>
+          <Text key={i} color={fadeOut ? 'gray' : accent} bold dimColor={fadeOut}>
             {revealedLines[i] || ''}
           </Text>
         ))}

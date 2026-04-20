@@ -1,6 +1,7 @@
 import { Command } from 'commander'
 import { runTUI } from '../tui/App.js'
 import { streamChat } from '../core/ollama.js'
+import { renderMarkdown } from '../utils/markdown.js'
 
 function clearScreen(): void {
   process.stdout.write('\x1B[2J\x1B[3J\x1B[H')
@@ -35,10 +36,15 @@ export function runCLI(): void {
 
       process.stdout.write('\x1B[36mnull\x1B[0m > ')
 
+      let buffer = ''
       streamChat(prompt, (token) => {
+        buffer += token
         process.stdout.write(token)
       }).then(() => {
-        process.stdout.write('\n')
+        // Clear raw output and replace with styled markdown
+        const lines = buffer.split('\n').length + 1
+        process.stdout.write(`\x1B[${lines}A\x1B[J`)
+        console.log(renderMarkdown(buffer))
       }).catch((err: Error) => {
         console.error(
           '\n\x1B[31mError:\x1B[0m Could not connect to Ollama. Is it running on localhost:11434?',
