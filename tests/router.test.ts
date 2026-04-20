@@ -114,6 +114,11 @@ describe('router → sportsQuery (heuristic)', () => {
     'jornada pasada liga mx',
     'jornada anterior',
     'jornada 15 liga mx',
+    // Jornada con liga en cualquier orden
+    'que tal estuvo la jornada de la liga',
+    'dame los resultados de LaLiga de la jornada pasada',
+    'como estuvo la jornada de la liga mx',
+    'jornada de la liga mx',
     // Tabla / standings
     'tabla de posiciones de la liga mx',
     'tabla general del clausura',

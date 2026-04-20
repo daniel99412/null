@@ -111,9 +111,15 @@ const FORCE_SPORTS_PATTERNS = [
   // "última jornada" — ú is non-word char so \b fails, use (?:^|\s)
   /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada|ultima\s+jornada|jornada\s+anterior)\b/i,
   /(?:^|\s)(última\s+jornada)(?:\s|$|[?,.])/i,
-  // Ligas específicas + palabras clave deportivas
-  /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i,
-  /\b(hoy|ayer|semana)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|champions)\b/i,
+  // bare "jornada" + any known league (order-independent)
+  /\bjornada\b.*(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue)/i,
+  /(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue).*\bjornada\b/i,
+  // bare "jornada" when asking how it went / results
+  /\bjornada\b.*(estuvo|fue|quedó|quedo|terminó|termino|salió|salio)/i,
+  /(?:como|cómo|qué tal|que tal)\b.*\bjornada\b/i,
+  // Ligas específicas + palabras clave deportivas (order-independent with .*|.*)
+  /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|laliga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i,
+  /\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|la\s+liga|laliga|champions)\b/i,
   // "juega hoy", "partido de X", "juego de X"
   // "juega hoy", "jugó ayer" — jugó/jugará end in accented char, use (?:\s|$) at end
   /(?:^|\s)(juega|juegan|jugaron)(?:\s|$|[?,.])/i,
