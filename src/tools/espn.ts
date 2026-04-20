@@ -176,26 +176,26 @@ function lastWeekendRange(): { from: Date; to: Date } {
   const lastSunday = new Date(now)
   lastSunday.setDate(now.getDate() - daysSinceSun)
   lastSunday.setHours(23, 59, 59, 999)
-  const lastSaturday = new Date(lastSunday)
-  lastSaturday.setDate(lastSunday.getDate() - 1)
-  lastSaturday.setHours(0, 0, 0, 0)
-  return { from: lastSaturday, to: lastSunday }
+  const lastFriday = new Date(lastSunday)
+  lastFriday.setDate(lastSunday.getDate() - 2)  // Fri = Sun - 2
+  lastFriday.setHours(0, 0, 0, 0)
+  return { from: lastFriday, to: lastSunday }
 }
 
 /**
- * Get Saturday and Sunday of the UPCOMING / current weekend.
+ * Get Friday–Sunday of the UPCOMING / current weekend.
  */
 function nextWeekendRange(): { from: Date; to: Date } {
   const now = new Date()
   const day = now.getDay()
-  const daysToSat = day === 6 ? 0 : (6 - day)
-  const saturday = new Date(now)
-  saturday.setDate(now.getDate() + daysToSat)
-  saturday.setHours(0, 0, 0, 0)
-  const sunday = new Date(saturday)
-  sunday.setDate(saturday.getDate() + 1)
+  const daysToFri = day <= 5 ? 5 - day : 5 - day + 7  // next Friday
+  const friday = new Date(now)
+  friday.setDate(now.getDate() + daysToFri)
+  friday.setHours(0, 0, 0, 0)
+  const sunday = new Date(friday)
+  sunday.setDate(friday.getDate() + 2)
   sunday.setHours(23, 59, 59, 999)
-  return { from: saturday, to: sunday }
+  return { from: friday, to: sunday }
 }
 
 
