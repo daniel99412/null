@@ -33,6 +33,7 @@ export interface ESPNScoreboard {
   leagueSlug: string
   season?: string
   games: ESPNGame[]
+  effectiveRange: DateRange  // actual date range used (may differ from requested if fallback triggered)
 }
 
 // ---------------------------------------------------------------------------
@@ -161,9 +162,43 @@ function lastWeekRange(): { from: Date; to: Date } {
   return { from: monday, to: sunday }
 }
 
-// ---------------------------------------------------------------------------
-// ESPN API fetch
-// ---------------------------------------------------------------------------
+/**
+ * Get Saturday and Sunday of the PREVIOUS weekend (local time).
+ * "Previous weekend" = the most recently completed Sat-Sun.
+ * If today is Mon/Tue/Wed, last weekend = Sat-Sun 2-3 days ago.
+ * If today is Thu/Fri, last weekend = same logic (still most recent past).
+ */
+function lastWeekendRange(): { from: Date; to: Date } {
+  const now = new Date()
+  const day = now.getDay() // 0=Sun,1=Mon,...,6=Sat
+  // Days since last Sunday
+  const daysSinceSun = day === 0 ? 7 : day  // if today is Sun, treat as 7 so we go to previous Sun
+  const lastSunday = new Date(now)
+  lastSunday.setDate(now.getDate() - daysSinceSun)
+  lastSunday.setHours(23, 59, 59, 999)
+  const lastSaturday = new Date(lastSunday)
+  lastSaturday.setDate(lastSunday.getDate() - 1)
+  lastSaturday.setHours(0, 0, 0, 0)
+  return { from: lastSaturday, to: lastSunday }
+}
+
+/**
+ * Get Saturday and Sunday of the UPCOMING / current weekend.
+ */
+function nextWeekendRange(): { from: Date; to: Date } {
+  const now = new Date()
+  const day = now.getDay()
+  const daysToSat = day === 6 ? 0 : (6 - day)
+  const saturday = new Date(now)
+  saturday.setDate(now.getDate() + daysToSat)
+  saturday.setHours(0, 0, 0, 0)
+  const sunday = new Date(saturday)
+  sunday.setDate(saturday.getDate() + 1)
+  sunday.setHours(23, 59, 59, 999)
+  return { from: saturday, to: sunday }
+}
+
+
 
 interface ESPNScoreboardRaw {
   leagues?: { name?: string; season?: { displayName?: string } }[]
@@ -217,7 +252,7 @@ async function fetchScoreboard(leagueSlug: string, dateParam: string): Promise<E
   return await res.json() as ESPNScoreboardRaw
 }
 
-function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string): ESPNScoreboard {
+function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string, range: DateRange): ESPNScoreboard {
   const league = raw.leagues?.[0]
   const games: ESPNGame[] = []
 
@@ -247,6 +282,7 @@ function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string): ESPNScoreb
     leagueSlug,
     season: league?.season?.displayName,
     games,
+    effectiveRange: range,
   }
 }
 
@@ -262,12 +298,24 @@ export interface DateRange {
 /**
  * Fetch scoreboard for a league and optional date range.
  * Defaults to the current week if no range provided.
+ * If the range has no completed games, automatically tries last weekend as fallback.
  */
 export async function getScoreboard(leagueSlug: string, range?: DateRange): Promise<ESPNScoreboard> {
   const r = range ?? currentWeekRange()
   const dateParam = `${toESPNDate(r.from)}-${toESPNDate(r.to)}`
   const raw = await fetchScoreboard(leagueSlug, dateParam)
-  return parseScoreboard(raw, leagueSlug)
+  const result = parseScoreboard(raw, leagueSlug, r)
+
+  // If no completed games found and no explicit range given, fall back to last weekend
+  if (!range && result.games.filter((g) => g.status === 'final').length === 0) {
+    const fallback = lastWeekendRange()
+    const fallbackParam = `${toESPNDate(fallback.from)}-${toESPNDate(fallback.to)}`
+    const fallbackRaw = await fetchScoreboard(leagueSlug, fallbackParam)
+    const fallbackResult = parseScoreboard(fallbackRaw, leagueSlug, fallback)
+    if (fallbackResult.games.length > 0) return fallbackResult
+  }
+
+  return result
 }
 
 /**
@@ -290,6 +338,26 @@ export function detectLeague(query: string): string | null {
   return null
 }
 
+const EXPLICIT_DATE_PATTERNS = [
+  /semana pasada|last week|semana anterior/,
+  /fin de semana|weekend/,
+  /esta semana|this week|semana actual/,
+  /\bhoy\b|\btoday\b/,
+  /\bayer\b|\byesterday\b/,
+  /últimos|ultimos|recientes|recent|últimas|ultimas/,
+  /próximos|proximos|siguientes|upcoming/,
+  /jornada\s+\d+/,
+]
+
+/**
+ * Returns true if the query contains an explicit time reference.
+ * Used to decide whether to pass range to getScoreboard or let it auto-detect.
+ */
+export function hasExplicitDateRange(query: string): boolean {
+  const q = query.toLowerCase()
+  return EXPLICIT_DATE_PATTERNS.some((p) => p.test(q))
+}
+
 /**
  * Detect the date range the user is asking about.
  * Returns a DateRange or defaults to current week.
@@ -300,6 +368,16 @@ export function detectDateRange(query: string): DateRange {
   // "semana pasada", "la semana pasada", "last week"
   if (/semana pasada|last week|semana anterior/.test(q)) {
     return lastWeekRange()
+  }
+
+  // "fin de semana pasado", "el fin de semana", "weekend" — most recent Sat-Sun
+  // Also catch bare "fin de semana" when asking for results (implied past)
+  if (/fin de semana pasado|last weekend|el fin de semana|fin de semana/.test(q)) {
+    // If query mentions "próximo" or "siguiente", return next weekend
+    if (/próximo|proximo|siguiente|next/.test(q)) {
+      return nextWeekendRange()
+    }
+    return lastWeekendRange()
   }
 
   // "esta semana", "this week", "semana actual"
