@@ -447,11 +447,14 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       buffer.current = ''
 
       const sendToLLM = async (): Promise<void> => {
+        // Build conversation history from all previous turns.
+        // messagesRef.current at this point has: [...prevTurns, {user: txt}, {assistant: ""}]
+        // We exclude the last entry (current user msg) since we push userContent separately,
+        // and filter out empty assistant placeholders and empty recall messages.
         const history: { role: string; content: string }[] = messagesRef.current
+          .slice(0, -2) // remove current user msg + empty assistant placeholder
           .filter((m) => {
-            // Skip empty assistant messages (placeholders)
             if (m.role === 'assistant' && !m.content.trim()) return false
-            // Skip empty recall messages
             if (m.role === 'recall' && !m.content.trim()) return false
             return true
           })
