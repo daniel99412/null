@@ -6,6 +6,7 @@ Your job is to classify the user query into exactly one of three options.
 Available tools:
 - webSearch: use ONLY when the query requires information from after September 2023, real-time data (prices, weather, scores), or unknown entities.
 - getDateTime: use ONLY when the user explicitly asks for the current date or time.
+- sportsQuery: use ONLY for sports-related queries that likely require up-to-date information, such as scores, standings, or upcoming matches.
 - none: use for general knowledge, programming, history, science, math, reasoning, jokes, and conversation.
 
 Rules:
@@ -17,7 +18,7 @@ Rules:
 - Only use "webSearch" if you are confident the information changes frequently or postdates your knowledge
 
 Respond ONLY with valid JSON. No text before or after.
-{ "tool": "webSearch" | "getDateTime" | "none", "confidence": number }`.trim()
+{ "tool": "webSearch" | "getDateTime" | "none" | "sportsQuery" , "confidence": number }`.trim()
 
 const MODEL = 'qwen2.5-coder:7b'
 
