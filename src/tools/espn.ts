@@ -296,28 +296,15 @@ export interface DateRange {
 }
 
 /**
- * Fetch scoreboard for a league and optional date range.
- * Defaults to the current week if no range provided.
- * If the range has no completed games, automatically tries last weekend as fallback.
+ * Fetch scoreboard for a league and a required date range.
+ * Always requires an explicit range — callers should use getLastMatchdayRange()
+ * when no date is specified.
  */
-export async function getScoreboard(leagueSlug: string, range?: DateRange): Promise<ESPNScoreboard> {
-  const r = range ?? currentWeekRange()
-  const dateParam = `${toESPNDate(r.from)}-${toESPNDate(r.to)}`
+export async function getScoreboard(leagueSlug: string, range: DateRange): Promise<ESPNScoreboard> {
+  const dateParam = `${toESPNDate(range.from)}-${toESPNDate(range.to)}`
   const raw = await fetchScoreboard(leagueSlug, dateParam)
-  const result = parseScoreboard(raw, leagueSlug, r)
-
-  // If no completed games found and no explicit range given, fall back to last weekend
-  if (!range && result.games.filter((g) => g.status === 'final').length === 0) {
-    const fallback = lastWeekendRange()
-    const fallbackParam = `${toESPNDate(fallback.from)}-${toESPNDate(fallback.to)}`
-    const fallbackRaw = await fetchScoreboard(leagueSlug, fallbackParam)
-    const fallbackResult = parseScoreboard(fallbackRaw, leagueSlug, fallback)
-    if (fallbackResult.games.length > 0) return fallbackResult
-  }
-
-  return result
+  return parseScoreboard(raw, leagueSlug, range)
 }
-
 /**
  * Fetch the last 21 days of games for a league and find the most recent
  * "matchday cluster" — a group of games played within a 4-day window.

@@ -207,10 +207,13 @@ async function performSportsQuery(query: string): Promise<string | null> {
   }
 
   const intent = detectDateIntent(query)
+  const hasExplicit = hasExplicitDateRange(query)
 
   try {
-    if (intent === 'lastMatchday') {
-      debugLog(`Sports query: league=${leagueSlug}, intent=lastMatchday`)
+    // Use lastMatchday when explicitly requested OR when no date is specified
+    // (generic "jornada de la liga" → find the most recent matchday automatically)
+    if (intent === 'lastMatchday' || !hasExplicit) {
+      debugLog(`Sports query: league=${leagueSlug}, intent=${intent === 'lastMatchday' ? 'lastMatchday' : 'auto-lastMatchday'}`)
       const range = await getLastMatchdayRange(leagueSlug)
       debugLog(`Last matchday range: ${range.from.toISOString().slice(0, 10)} to ${range.to.toISOString().slice(0, 10)}`)
       const scoreboard = await getScoreboard(leagueSlug, range)
@@ -218,10 +221,9 @@ async function performSportsQuery(query: string): Promise<string | null> {
       return formatScoreboardContext(scoreboard, scoreboard.effectiveRange)
     }
 
-    // intent === 'range'
-    const explicitRange = hasExplicitDateRange(query) ? detectDateRange(query) : undefined
-    const rangeForLog = explicitRange ?? detectDateRange(query)
-    debugLog(`Sports query: league=${leagueSlug}, range=${rangeForLog.from.toISOString().slice(0, 10)} to ${rangeForLog.to.toISOString().slice(0, 10)}, explicit=${explicitRange !== undefined}`)
+    // intent === 'range' with explicit date keyword (hoy, semana pasada, fin de semana, etc.)
+    const explicitRange = detectDateRange(query)
+    debugLog(`Sports query: league=${leagueSlug}, range=${explicitRange.from.toISOString().slice(0, 10)} to ${explicitRange.to.toISOString().slice(0, 10)}`)
 
     const scoreboard = await getScoreboard(leagueSlug, explicitRange)
     debugLog(`ESPN returned ${scoreboard.games.length} games`)
