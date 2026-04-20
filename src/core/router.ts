@@ -102,17 +102,22 @@ const FORCE_SPORTS_PATTERNS = [
   // Resultados / marcadores
   /\b(resultados?|marcador(es)?|scores?)\b/i,
   /(?:^|\s)(últimos|ultimos)\b.*\b(partidos?|juegos?|encuentros?)\b/i,
-  /\b(cómo|como|cuánto|cuanto)\b.*\b(quedó|quedo|terminó|termino|ganó|gano)\b/i,
+  // "cómo quedó/terminó/ganó" — use (?:^|\s) for accented words (\b fails with Unicode)
+  /(?:^|\s)(cómo|como|cuánto|cuanto)\b.*(quedó|quedo|terminó|termino|ganó|gano)(?:\s|$|[?,.])/i,
   // Tabla de posiciones / standings
   /\b(tabla\s+de\s+posiciones|tabla\s+general|standings?|clasificaci[oó]n|posiciones)\b/i,
   // Próximos partidos / calendario
   /(?:^|\s)(próximos|proximos)\b.*\b(partidos?|juegos?|encuentros?)\b/i,
-  /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada|última\s+jornada|ultima\s+jornada|jornada\s+anterior)\b/i,
+  // "última jornada" — ú is non-word char so \b fails, use (?:^|\s)
+  /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada|ultima\s+jornada|jornada\s+anterior)\b/i,
+  /(?:^|\s)(última\s+jornada)(?:\s|$|[?,.])/i,
   // Ligas específicas + palabras clave deportivas
   /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i,
   /\b(hoy|ayer|semana)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|champions)\b/i,
   // "juega hoy", "partido de X", "juego de X"
-  /(?:^|\s)(juega|juegan|jugaron|jugó|jugara|jugará)\b/i,
+  // "juega hoy", "jugó ayer" — jugó/jugará end in accented char, use (?:\s|$) at end
+  /(?:^|\s)(juega|juegan|jugaron)(?:\s|$|[?,.])/i,
+  /(?:^|\s)(jugó|jugara|jugará)/i,
   /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i,
 ]
 
@@ -128,6 +133,7 @@ const FORCE_SEARCH_PATTERNS = [
 const FORCE_DATETIME_PATTERNS = [
   /\b(qué hora|what time|que hora)\b/i,
   /\b(qué día|what day|qué fecha|what date|en qué fecha)\b/i,
+  /\b(today'?s date|what is today|what's today)\b/i,
 ]
 
 export async function routeQuery(query: string): Promise<RouterResult> {
