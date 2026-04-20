@@ -319,7 +319,55 @@ export async function getScoreboard(leagueSlug: string, range?: DateRange): Prom
 }
 
 /**
- * Detect which league the user is asking about.
+ * Fetch the last 21 days of games for a league and find the most recent
+ * "matchday cluster" — a group of games played within a 4-day window.
+ * Returns the date range of that cluster (the last jornada).
+ * Falls back to lastWeekendRange() if no completed games are found.
+ */
+export async function getLastMatchdayRange(leagueSlug: string): Promise<DateRange> {
+  const to = new Date()
+  const from = new Date()
+  from.setDate(to.getDate() - 21)
+  from.setHours(0, 0, 0, 0)
+
+  const dateParam = `${toESPNDate(from)}-${toESPNDate(to)}`
+  try {
+    const raw = await fetchScoreboard(leagueSlug, dateParam)
+    const games = parseScoreboard(raw, leagueSlug, { from, to }).games
+    const finals = games.filter((g) => g.status === 'final')
+
+    if (finals.length === 0) return lastWeekendRange()
+
+    // Group by local date string, sorted descending
+    const dateMap = new Map<string, Date>()
+    for (const g of finals) {
+      const d = new Date(g.date)
+      const key = d.toISOString().slice(0, 10)
+      dateMap.set(key, d)
+    }
+
+    const sortedDates = [...dateMap.keys()].sort().reverse()
+    if (sortedDates.length === 0) return lastWeekendRange()
+
+    // Walk back from the most recent date and collect dates within a 4-day window
+    const latestDate = new Date(sortedDates[0] + 'T00:00:00Z')
+    const clusterDates = sortedDates.filter((ds) => {
+      const diff = (latestDate.getTime() - new Date(ds + 'T00:00:00Z').getTime()) / 86400000
+      return diff <= 4
+    })
+
+    const clusterFrom = new Date(clusterDates[clusterDates.length - 1] + 'T00:00:00Z')
+    clusterFrom.setHours(0, 0, 0, 0)
+    const clusterTo = new Date(clusterDates[0] + 'T23:59:59Z')
+    clusterTo.setHours(23, 59, 59, 999)
+
+    return { from: clusterFrom, to: clusterTo }
+  } catch {
+    return lastWeekendRange()
+  }
+}
+
+/**
  * Returns the ESPN league slug or null if not detected.
  */
 export function detectLeague(query: string): string | null {
@@ -347,7 +395,22 @@ const EXPLICIT_DATE_PATTERNS = [
   /últimos|ultimos|recientes|recent|últimas|ultimas/,
   /próximos|proximos|siguientes|upcoming/,
   /jornada\s+\d+/,
+  /última jornada|ultima jornada|last matchday|jornada pasada|jornada anterior/,
 ]
+
+export type DateIntent = 'lastMatchday' | 'range'
+
+/**
+ * Returns the date intent: 'lastMatchday' if user asked for última jornada,
+ * 'range' for everything else (use detectDateRange + hasExplicitDateRange).
+ */
+export function detectDateIntent(query: string): DateIntent {
+  const q = query.toLowerCase()
+  if (/última jornada|ultima jornada|last matchday|jornada pasada|jornada anterior/.test(q)) {
+    return 'lastMatchday'
+  }
+  return 'range'
+}
 
 /**
  * Returns true if the query contains an explicit time reference.

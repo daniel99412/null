@@ -31,7 +31,7 @@ import { runCleanup } from '../memory/cleanup.js'
 import { routeQuery } from '../core/router.js'
 import { getCachedSearch, setCachedSearch } from '../memory/search-cache.js'
 import type { SearchContext } from '../tools/web-search.js'
-import { getScoreboard, detectLeague, detectDateRange, hasExplicitDateRange, formatScoreboardContext } from '../tools/espn.js'
+import { getScoreboard, detectLeague, detectDateRange, detectDateIntent, hasExplicitDateRange, getLastMatchdayRange, formatScoreboardContext } from '../tools/espn.js'
 
 const MODEL = 'qwen2.5-coder:7b'
 
@@ -206,13 +206,23 @@ async function performSportsQuery(query: string): Promise<string | null> {
     return null
   }
 
-  // Only pass explicit range to getScoreboard if the user specified one.
-  // Otherwise pass undefined so getScoreboard can auto-fallback to last weekend.
-  const explicitRange = hasExplicitDateRange(query) ? detectDateRange(query) : undefined
-  const rangeForLog = explicitRange ?? detectDateRange(query)
-  debugLog(`Sports query: league=${leagueSlug}, range=${rangeForLog.from.toISOString().slice(0, 10)} to ${rangeForLog.to.toISOString().slice(0, 10)}, explicit=${explicitRange !== undefined}`)
+  const intent = detectDateIntent(query)
 
   try {
+    if (intent === 'lastMatchday') {
+      debugLog(`Sports query: league=${leagueSlug}, intent=lastMatchday`)
+      const range = await getLastMatchdayRange(leagueSlug)
+      debugLog(`Last matchday range: ${range.from.toISOString().slice(0, 10)} to ${range.to.toISOString().slice(0, 10)}`)
+      const scoreboard = await getScoreboard(leagueSlug, range)
+      debugLog(`ESPN returned ${scoreboard.games.length} games`)
+      return formatScoreboardContext(scoreboard, scoreboard.effectiveRange)
+    }
+
+    // intent === 'range'
+    const explicitRange = hasExplicitDateRange(query) ? detectDateRange(query) : undefined
+    const rangeForLog = explicitRange ?? detectDateRange(query)
+    debugLog(`Sports query: league=${leagueSlug}, range=${rangeForLog.from.toISOString().slice(0, 10)} to ${rangeForLog.to.toISOString().slice(0, 10)}, explicit=${explicitRange !== undefined}`)
+
     const scoreboard = await getScoreboard(leagueSlug, explicitRange)
     debugLog(`ESPN returned ${scoreboard.games.length} games`)
     return formatScoreboardContext(scoreboard, scoreboard.effectiveRange)

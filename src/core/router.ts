@@ -107,7 +107,7 @@ const FORCE_SPORTS_PATTERNS = [
   /\b(tabla\s+de\s+posiciones|tabla\s+general|standings?|clasificaci[oó]n|posiciones)\b/i,
   // Próximos partidos / calendario
   /(?:^|\s)(próximos|proximos)\b.*\b(partidos?|juegos?|encuentros?)\b/i,
-  /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada)\b/i,
+  /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada|última\s+jornada|ultima\s+jornada|jornada\s+anterior)\b/i,
   // Ligas específicas + palabras clave deportivas
   /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i,
   /\b(hoy|ayer|semana)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|champions)\b/i,
