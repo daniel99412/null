@@ -31,6 +31,7 @@ import { runCleanup } from '../memory/cleanup.js'
 import { routeQuery } from '../core/router.js'
 import { getCachedSearch, setCachedSearch } from '../memory/search-cache.js'
 import type { SearchContext } from '../tools/web-search.js'
+import { getScoreboard, detectLeague, detectDateRange, formatScoreboardContext } from '../tools/espn.js'
 
 const MODEL = 'qwen2.5-coder:7b'
 
@@ -192,6 +193,30 @@ async function performSearch(query: string, originalTxt: string): Promise<Search
     debugLog(`Search pipeline error: ${err}`)
   }
   return null
+}
+
+/**
+ * Sports pipeline: detect league + date range → ESPN API → formatted context.
+ * Returns null if no league detected (falls back to webSearch).
+ */
+async function performSportsQuery(query: string): Promise<string | null> {
+  const leagueSlug = detectLeague(query)
+  if (!leagueSlug) {
+    debugLog('No league detected — falling back to webSearch')
+    return null
+  }
+
+  const range = detectDateRange(query)
+  debugLog(`Sports query: league=${leagueSlug}, range=${range.from.toISOString().slice(0, 10)} to ${range.to.toISOString().slice(0, 10)}`)
+
+  try {
+    const scoreboard = await getScoreboard(leagueSlug, range)
+    debugLog(`ESPN returned ${scoreboard.games.length} games`)
+    return formatScoreboardContext(scoreboard, range)
+  } catch (err) {
+    debugLog(`ESPN API error: ${err}`)
+    return null
+  }
 }
 
 interface ChatProps {
@@ -464,6 +489,34 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           if (decision === 'getDateTime') {
             const t = tools.get_time()
             userContent = `Current time: ${t.time}, date: ${t.date}. User asked: "${txt}". Answer naturally.`
+
+          } else if (decision === 'sportsQuery') {
+            updateMessages((m) => {
+              const copy = [...m]
+              const last = copy[copy.length - 1]
+              if (last?.role === 'assistant') last.content = '⚽ Consultando resultados deportivos...'
+              return copy
+            })
+
+            const sportsCtx = await performSportsQuery(txt)
+            if (sportsCtx) {
+              searchContext = sportsCtx
+              userContent = txt
+            } else {
+              // League not recognized — fall back to web search
+              const result = await performSearch(txt, txt)
+              if (result) {
+                searchContext = result.contextMessage
+                userContent = txt
+              }
+            }
+
+            updateMessages((m) => {
+              const copy = [...m]
+              const last = copy[copy.length - 1]
+              if (last?.role === 'assistant') last.content = ''
+              return copy
+            })
 
           } else if (decision === 'webSearch') {
             updateMessages((m) => {

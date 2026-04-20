@@ -21,7 +21,7 @@ Respond ONLY with valid JSON. No text before or after.
 
 const MODEL = 'qwen2.5-coder:7b'
 
-export type RoutingDecision = 'webSearch' | 'getDateTime' | 'none'
+export type RoutingDecision = 'webSearch' | 'getDateTime' | 'sportsQuery' | 'none'
 
 export interface RouterResult {
   decision: RoutingDecision
@@ -96,7 +96,27 @@ const KNOWLEDGE_QUESTION_PATTERNS = [
 // Note: avoid \b around accented chars (JS regex \b doesn't support Unicode)
 const RECENCY_INDICATORS = /(?:^|\s)(hoy|today|ahora|now|actual|current|últim[oa]s?|latest|reciente|recent|202[4-9]|20[3-9]\d|este año|this year|esta semana|this week|ayer|yesterday)(?:\s|$|[?,.])/i
 
-// Fuerza WEBSEARCH — siempre buscar esto
+// Fuerza SPORTSQUERY — consultas deportivas con resultados, marcadores, tabla, etc.
+// Debe correr ANTES de FORCE_SEARCH_PATTERNS para no caer en webSearch genérico
+const FORCE_SPORTS_PATTERNS = [
+  // Resultados / marcadores
+  /\b(resultados?|marcador(es)?|scores?)\b/i,
+  /(?:^|\s)(últimos|ultimos)\b.*\b(partidos?|juegos?|encuentros?)\b/i,
+  /\b(cómo|como|cuánto|cuanto)\b.*\b(quedó|quedo|terminó|termino|ganó|gano)\b/i,
+  // Tabla de posiciones / standings
+  /\b(tabla\s+de\s+posiciones|tabla\s+general|standings?|clasificaci[oó]n|posiciones)\b/i,
+  // Próximos partidos / calendario
+  /(?:^|\s)(próximos|proximos)\b.*\b(partidos?|juegos?|encuentros?)\b/i,
+  /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada)\b/i,
+  // Ligas específicas + palabras clave deportivas
+  /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i,
+  /\b(hoy|ayer|semana)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|champions)\b/i,
+  // "juega hoy", "partido de X", "juego de X"
+  /(?:^|\s)(juega|juegan|jugaron|jugó|jugara|jugará)\b/i,
+  /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i,
+]
+
+
 const FORCE_SEARCH_PATTERNS = [
   /\b(20[2-9][4-9]|20[3-9]\d)\b/,          // años después del cutoff (2024+)
   /\b(hoy|today|ahorita|ahora|right now)\b.*\b(precio|price|clima|weather|dólar|dollar)\b/i,
@@ -117,6 +137,12 @@ export async function routeQuery(query: string): Promise<RouterResult> {
   for (const pattern of FORCE_NONE_PATTERNS) {
     if (pattern.test(normalizedQuery)) {
       return { decision: 'none', confidence: 1, source: 'heuristic' }
+    }
+  }
+
+  for (const pattern of FORCE_SPORTS_PATTERNS) {
+    if (pattern.test(normalizedQuery)) {
+      return { decision: 'sportsQuery', confidence: 1, source: 'heuristic' }
     }
   }
 
@@ -150,7 +176,7 @@ export async function routeQuery(query: string): Promise<RouterResult> {
       ROUTER_SYSTEM_PROMPT,
     )
     const parsed = JSON.parse(llmResponse) as { tool: RoutingDecision; confidence: number }
-    if (['webSearch', 'getDateTime', 'none'].includes(parsed.tool)) {
+    if (['webSearch', 'getDateTime', 'sportsQuery', 'none'].includes(parsed.tool)) {
       // If LLM says "none" but with low confidence, default to webSearch
       // Better to search unnecessarily than to hallucinate about unknown topics
       if (parsed.tool === 'none' && parsed.confidence < 0.7) {
