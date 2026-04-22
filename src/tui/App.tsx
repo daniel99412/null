@@ -32,6 +32,36 @@ import { routeQuery } from '../core/router.js'
 import { getCachedSearch, setCachedSearch } from '../memory/search-cache.js'
 import type { SearchContext } from '../tools/web-search.js'
 import { getScoreboard, detectLeague, detectDateRange, detectDateIntent, hasExplicitDateRange, getLastMatchdayRange, formatScoreboardContext } from '../tools/espn.js'
+import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/weather.js'
+
+/**
+ * Extract city name from a weather query using simple regex patterns.
+ * Returns null if no city is mentioned (use IP geolocation instead).
+ * Examples:
+ *   "clima en Cancún"         → "Cancún"
+ *   "cómo está el clima en Tokyo" → "Tokyo"
+ *   "qué clima hace"          → null
+ */
+function extractCityFromQuery(query: string): string | null {
+  const patterns = [
+    /(?:clima|tiempo|temperatura|weather)\s+(?:en|de|para|in)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)(?:\?|$|,|\s+hoy|\s+ahorita|\s+ahora)/i,
+    /(?:en|de|para|in)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)\s+(?:clima|tiempo|temperatura|weather)/i,
+    /(?:hace\s+(?:calor|frío|frio)\s+en)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)(?:\?|$|,)/i,
+    /(?:va\s+a\s+llover\s+en)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)(?:\?|$|,)/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = query.match(pattern)
+    if (match) {
+      const city = match[1].trim()
+      // sanity check: ignore very short or generic matches
+      if (city.length >= 3 && !/^(hoy|ahora|aqui|aquí|mi|la|el)$/i.test(city)) {
+        return city
+      }
+    }
+  }
+  return null
+}
 
 const MODEL = 'qwen2.5-coder:7b'
 
@@ -193,6 +223,33 @@ async function performSearch(query: string, originalTxt: string): Promise<Search
     debugLog(`Search pipeline error: ${err}`)
   }
   return null
+}
+
+/**
+ * Build weather context message to pass to LLM.
+ */
+function buildWeatherContext(weather: WeatherData): string {
+  const sunriseStr = new Date(weather.sunrise * 1000).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+  const sunsetStr = new Date(weather.sunset * 1000).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+  const locationStr = weather.location
+    ? `Ubicación detectada (IP): ${weather.location.city}, ${weather.location.region}`
+    : `Ciudad consultada: ${weather.city_query}`
+
+  return [
+    `[DATOS REALES DEL CLIMA — obtenidos ahora mismo vía API]`,
+    `Ciudad: ${weather.city_name}, ${weather.country}`,
+    `Condición: ${weather.description}`,
+    `Temperatura: ${weather.temp}°C (sensación térmica ${weather.feels_like}°C)`,
+    `Humedad: ${weather.humidity}%`,
+    `Presión: ${weather.pressure} hPa`,
+    `Viento: ${weather.wind_speed} m/s`,
+    `Visibilidad: ${(weather.visibility / 1000).toFixed(1)} km`,
+    `Nubosidad: ${weather.clouds}%`,
+    `Amanecer: ${sunriseStr} / Atardecer: ${sunsetStr}`,
+    locationStr,
+    ``,
+    `Con estos datos reales responde la pregunta del usuario de forma natural y conversacional. NO digas que no tienes acceso a internet — estos datos son reales y actuales.`,
+  ].join('\n')
 }
 
 /**
@@ -507,6 +564,34 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           if (decision === 'getDateTime') {
             const t = tools.get_time()
             userContent = `Current time: ${t.time}, date: ${t.date}. User asked: "${txt}". Answer naturally.`
+
+          } else if (decision === 'getWeather') {
+            updateMessages((m) => {
+              const copy = [...m]
+              const last = copy[copy.length - 1]
+              if (last?.role === 'assistant') last.content = '🌤 Obteniendo clima...'
+              return copy
+            })
+
+            try {
+              const city = extractCityFromQuery(txt)
+              debugLog(`Weather query — city extracted: ${city ?? '(none, using IP location)'}`)
+              const weather = city
+                ? await getWeatherByCity(city)
+                : await getCurrentWeather()
+              const ctx = buildWeatherContext(weather)
+              userContent = `${ctx}\n\nPregunta del usuario: ${txt}`
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err)
+              userContent = `No se pudo obtener el clima: ${errMsg}. Informa al usuario de forma amable.`
+            }
+
+            updateMessages((m) => {
+              const copy = [...m]
+              const last = copy[copy.length - 1]
+              if (last?.role === 'assistant') last.content = ''
+              return copy
+            })
 
           } else if (decision === 'sportsQuery') {
             updateMessages((m) => {

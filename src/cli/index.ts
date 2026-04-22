@@ -2,6 +2,10 @@ import { Command } from 'commander'
 import { runTUI } from '../tui/App.js'
 import { streamChat } from '../core/ollama.js'
 import { renderMarkdown } from '../utils/markdown.js'
+import { loadConfig, setAccentColor, saveConfig, type AccentColor } from '../config/index.js'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
 
 function clearScreen(): void {
   process.stdout.write('\x1B[2J\x1B[3J\x1B[H')
@@ -21,6 +25,43 @@ export function runCLI(): void {
     .name('null')
     .description('Your AI-powered virtual secretary that runs in the terminal.')
     .version('0.1.0')
+
+  const configCmd = program
+    .command('config')
+    .description('Manage configuration')
+
+  configCmd
+    .command('show')
+    .description('Show current configuration')
+    .action(() => {
+      const config = loadConfig()
+      console.log(JSON.stringify(config, null, 2))
+    })
+
+  configCmd
+    .command('set')
+    .description('Set a configuration value')
+    .argument('<key>', 'config key (accent-color, weather-key)')
+    .argument('<value>', 'value')
+    .action((key: string, value: string) => {
+      if (key === 'accent-color') {
+        setAccentColor(value as AccentColor)
+        console.log(`Accent color set to: ${value}`)
+      } else if (key === 'weather-key') {
+        const config = loadConfig()
+        config.openWeatherApiKey = value
+        const configDir = path.join(os.homedir(), '.null-cli')
+        const configPath = path.join(configDir, 'config.json')
+        if (!fs.existsSync(configDir)) {
+          fs.mkdirSync(configDir, { recursive: true })
+        }
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+        console.log('OpenWeather API key saved')
+      } else {
+        console.error(`Unknown key: ${key}. Valid keys: accent-color, weather-key`)
+        process.exit(1)
+      }
+    })
 
   program
     .argument('[prompt...]', 'prompt to execute directly')

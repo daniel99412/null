@@ -4,8 +4,9 @@ const ROUTER_SYSTEM_PROMPT = `You are a strict tool router.
 Your job is to classify the user query into exactly one of three options.
 
 Available tools:
-- webSearch: use ONLY when the query requires information from after September 2023, real-time data (prices, weather, scores), or unknown entities.
+- webSearch: use ONLY when the query requires information from after September 2023, real-time data (prices, scores), or unknown entities.
 - getDateTime: use ONLY when the user explicitly asks for the current date or time.
+- getWeather: use ONLY when the user asks about current weather, temperature, forecast, rain, or climate conditions.
 - sportsQuery: use ONLY for sports-related queries that likely require up-to-date information, such as scores, standings, or upcoming matches.
 - none: use for general knowledge, programming, history, science, math, reasoning, jokes, and conversation.
 
@@ -18,11 +19,11 @@ Rules:
 - Only use "webSearch" if you are confident the information changes frequently or postdates your knowledge
 
 Respond ONLY with valid JSON. No text before or after.
-{ "tool": "webSearch" | "getDateTime" | "none" | "sportsQuery" , "confidence": number }`.trim()
+{ "tool": "webSearch" | "getDateTime" | "getWeather" | "none" | "sportsQuery" , "confidence": number }`.trim()
 
 const MODEL = 'qwen2.5-coder:7b'
 
-export type RoutingDecision = 'webSearch' | 'getDateTime' | 'sportsQuery' | 'none'
+export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'none'
 
 export interface RouterResult {
   decision: RoutingDecision
@@ -136,6 +137,14 @@ const FORCE_SEARCH_PATTERNS = [
   /\b(precio|cotización|exchange rate)\b.*\b(dólar|euro|bitcoin|crypto)\b/i,
 ]
 
+// Fuerza GETWEATHER — consultas de clima/temperatura
+const FORCE_WEATHER_PATTERNS = [
+  /\b(clima|weather|temperatura|temperature|calor|fr[íi]o|lluvia|rain|nublado|cloudy|pron[oó]stico|forecast)\b/i,
+  /(?:^|\s)(c[oó]mo\s+est[aá]\s+el\s+(clima|tiempo|d[íi]a))(?:\s|$|[?,.])/i,
+  /(?:^|\s)(qu[eé]\s+temperatura)(?:\s|$|[?,.])/i,
+  /(?:^|\s)(va\s+a\s+llover|va\s+a\s+hacer\s+(calor|fr[íi]o))(?:\s|$|[?,.])/i,
+]
+
 // Fuerza GETDATETIME
 const FORCE_DATETIME_PATTERNS = [
   /\b(qué hora|what time|que hora)\b/i,
@@ -156,6 +165,12 @@ export async function routeQuery(query: string): Promise<RouterResult> {
   for (const pattern of FORCE_SPORTS_PATTERNS) {
     if (pattern.test(normalizedQuery)) {
       return { decision: 'sportsQuery', confidence: 1, source: 'heuristic' }
+    }
+  }
+
+  for (const pattern of FORCE_WEATHER_PATTERNS) {
+    if (pattern.test(normalizedQuery)) {
+      return { decision: 'getWeather', confidence: 1, source: 'heuristic' }
     }
   }
 
@@ -189,7 +204,7 @@ export async function routeQuery(query: string): Promise<RouterResult> {
       ROUTER_SYSTEM_PROMPT,
     )
     const parsed = JSON.parse(llmResponse) as { tool: RoutingDecision; confidence: number }
-    if (['webSearch', 'getDateTime', 'sportsQuery', 'none'].includes(parsed.tool)) {
+    if (['webSearch', 'getDateTime', 'getWeather', 'sportsQuery', 'none'].includes(parsed.tool)) {
       // If LLM says "none" but with low confidence, default to webSearch
       // Better to search unnecessarily than to hallucinate about unknown topics
       if (parsed.tool === 'none' && parsed.confidence < 0.7) {

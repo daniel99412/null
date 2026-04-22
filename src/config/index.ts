@@ -17,8 +17,21 @@ export const AVAILABLE_COLORS = [
 
 export type AccentColor = typeof AVAILABLE_COLORS[number]
 
+export interface CachedLocation {
+  ip: string
+  lat: number
+  lon: number
+  city: string
+  region: string
+  country: string
+  country_code: string
+  timezone: string
+}
+
 export interface NullConfig {
   accentColor: AccentColor
+  openWeatherApiKey?: string
+  cachedLocation?: CachedLocation
 }
 
 const DEFAULT_CONFIG: NullConfig = {
@@ -36,6 +49,8 @@ export function loadConfig(): NullConfig {
       accentColor: AVAILABLE_COLORS.includes(parsed.accentColor as AccentColor)
         ? (parsed.accentColor as AccentColor)
         : DEFAULT_CONFIG.accentColor,
+      openWeatherApiKey: parsed.openWeatherApiKey,
+      cachedLocation: parsed.cachedLocation,
     }
   } catch {
     return { ...DEFAULT_CONFIG }

@@ -1,6 +1,8 @@
 import { searchAndExtract } from '../tools/web-search.js'
 import type { SearchContext } from '../tools/web-search.js'
 import { fetchPageText } from '../tools/web-fetch.js'
+import { getLocation, type GeoLocation } from '../tools/gps.js'
+import { getCurrentWeather, type WeatherData } from '../tools/weather.js'
 
 export const tools = {
   get_time: () => {
@@ -12,6 +14,14 @@ export const tools = {
       date: now.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }),
       day: now.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' }),
     }
+  },
+
+  get_location: async (): Promise<GeoLocation> => {
+    return getLocation()
+  },
+
+  get_weather: async (): Promise<WeatherData> => {
+    return getCurrentWeather()
   },
 
   web_search: async (query: string): Promise<SearchContext> => {
