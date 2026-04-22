@@ -142,3 +142,11 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Graphify knowledge graph (local, per-user)
+graphify-out/
+
+# Ollama database (local)
+*.db
+*.db-shm
+*.db-wal

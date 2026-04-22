@@ -78,6 +78,7 @@ Null uses a tool-based architecture. Tools are functions the LLM can call to per
 - `write` — Write files to disk
 - `grep` — Search file contents
 - `glob` — Find files by pattern
+- `graphify` — Knowledge graph from codebase (`/graphify <path>`) — installed as `graphifyy` Python package
 
 ### Planned Tools
 - Web search/fetch
@@ -142,6 +143,11 @@ When adding new tools:
 ---
 
 ## Context for AI Agents
+
+**IMPORTANT: Always check graphify-out first**
+- Before reading the entire codebase, check `graphify-out/GRAPH_REPORT.md` for architecture context
+- Use the knowledge graph in `graphify-out/graph.json` to understand code relationships
+- Run `/graphify` (or `graphify .`) after code changes to update the graph
 
 When working on Null:
 
