@@ -994,6 +994,10 @@ export interface SportsQueryOutput {
   scoreboard?: ESPNScoreboard
   /** True when the query is primarily about news/headlines — TUI skips scoreboard commentary */
   newsIntent?: boolean
+  /** Number of news articles found specifically about the focus team (0 = weak ESPN context) */
+  teamNewsCount?: number
+  /** Focus team name, if one was detected */
+  focusTeamName?: string
 }
 
 /**
@@ -1047,6 +1051,8 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   // --- Cached news fetch ---
   const newsKey = buildNewsCacheKey(leagueSlug, focusTeam?.id)
   let news: ESPNNewsArticle[] | undefined = getCachedNews(newsKey) ?? undefined
+  // Tracks how many articles specifically matched the focus team (0 = weak context)
+  let teamNewsCount = 0
   if (!news) {
     try {
       if (focusTeam?.id) {
@@ -1054,6 +1060,7 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
         const teamNews = await getTeamNews(leagueSlug, focusTeam.id, 5)
         if (teamNews.length > 0) {
           news = teamNews
+          teamNewsCount = teamNews.length
         } else {
           // Team news endpoint returned empty (common for Liga MX) — fall back to
           // league news and filter articles that mention the team by name
@@ -1065,12 +1072,14 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
             (a.description ?? '').toLowerCase().includes(teamNameLower) ||
             a.categories.some((c) => c.toLowerCase().includes(teamNameLower))
           )
+          teamNewsCount = filtered.length
           news = filtered.length > 0 ? filtered.slice(0, 5) : leagueNews.slice(0, 5)
-          debugLog(`[espn] filtered league news: ${filtered.length} matching articles (showing ${news.length})`)
+          debugLog(`[espn] filtered league news: ${filtered.length} matching (teamNewsCount=${teamNewsCount})`)
         }
       } else {
         debugLog(`[espn] fetching league news: ${leagueSlug}`)
         news = await getLeagueNews(leagueSlug, 5)
+        teamNewsCount = news.length
       }
       debugLog(`[espn] news: ${news.length} articles`)
       setCachedNews(newsKey, news)
@@ -1079,6 +1088,16 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
     }
   } else {
     debugLog(`[espn] news cache hit`)
+    // Recompute teamNewsCount from cache when focusTeam present
+    if (focusTeam) {
+      const t = focusTeam.name.toLowerCase()
+      teamNewsCount = news.filter((a) =>
+        a.headline.toLowerCase().includes(t) ||
+        (a.description ?? '').toLowerCase().includes(t)
+      ).length
+    } else {
+      teamNewsCount = news.length
+    }
   }
 
   // --- Cached standings fetch ---
@@ -1228,5 +1247,7 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
     seasonPhase: scoreboard?.seasonPhase,
     scoreboard,
     newsIntent,
+    teamNewsCount,
+    focusTeamName: focusTeam?.name,
   }
 }

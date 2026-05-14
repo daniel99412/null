@@ -34,6 +34,8 @@ export interface AgentResult {
   scoreboard?: ESPNScoreboard
   /** True when query was primarily about news — TUI should skip scoreboard commentary */
   newsIntent?: boolean
+  /** Number of ESPN articles that specifically matched the focus team */
+  teamNewsCount?: number
   /** When set, display this text directly without streaming through LLM */
   directResponse?: string
 }
@@ -383,19 +385,34 @@ export async function processQuery(
     onStatus?.('Consultando resultados deportivos...')
     const sportsResult = await buildSportsContext(query)
     if (sportsResult) {
-      // Inject sports memory context (teams/leagues/sports) into the LLM context
       const memCtx = buildSportsMemoryContext()
-      const llmContext = memCtx
+      let llmContext = memCtx
         ? `${memCtx}\n\n${sportsResult.llmContext}`
         : sportsResult.llmContext
+
+      // If news intent but ESPN returned < 2 team-specific articles, supplement with webSearch
+      if (sportsResult.newsIntent && (sportsResult.teamNewsCount ?? 0) < 2) {
+        const webQuery = sportsResult.focusTeamName
+          ? `noticias ${sportsResult.focusTeamName} futbol`
+          : query
+        debugLog(`[agent] ESPN news thin (${sportsResult.teamNewsCount ?? 0}) — supplementing with webSearch: "${webQuery}"`)
+        onStatus?.('Buscando noticias en la web...')
+        const webResult = await performSearch(webQuery, query)
+        if (webResult) {
+          llmContext = `${llmContext}\n\n--- Noticias adicionales (web) ---\n${webResult.contextMessage}`
+          debugLog(`[agent] webSearch supplement added (${webResult.contextMessage.length} chars)`)
+        }
+      }
+
       return {
         userContent: query,
         searchContext: llmContext,
         statusMessage: 'Consultando resultados deportivos...',
         tableOutput: sportsResult.tableOutput,
-          seasonPhase: sportsResult.seasonPhase,
-          scoreboard: sportsResult.scoreboard,
-          newsIntent: sportsResult.newsIntent,
+        seasonPhase: sportsResult.seasonPhase,
+        scoreboard: sportsResult.scoreboard,
+        newsIntent: sportsResult.newsIntent,
+        teamNewsCount: sportsResult.teamNewsCount,
       }
     }
 
@@ -424,6 +441,7 @@ export async function processQuery(
           seasonPhase: retryResult.seasonPhase,
           scoreboard: retryResult.scoreboard,
           newsIntent: retryResult.newsIntent,
+          teamNewsCount: retryResult.teamNewsCount,
         }
       }
       debugLog(`ESPN retry also failed — falling back to webSearch with enriched query`)
