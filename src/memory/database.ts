@@ -2,6 +2,9 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import os from 'os'
 import fs from 'fs'
+import { createRequire } from 'module'
+
+const _require = createRequire(import.meta.url)
 
 const DATA_DIR = path.join(os.homedir(), '.null-cli')
 const DB_PATH = path.join(DATA_DIR, 'null.db')
@@ -149,6 +152,30 @@ export function getDb(): Database.Database {
       was_useful INTEGER,                      -- 1/0/NULL
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- ── ESPN catalog tables ───────────────────────────────────────────────────
+    -- These replace static in-code maps in espn.ts.
+    -- Editable at runtime: INSERT/UPDATE rows without recompiling.
+
+    -- League aliases → ESPN API slug + sport (replaces LEAGUE_MAP + LEAGUE_SPORT_MAP)
+    CREATE TABLE IF NOT EXISTS espn_leagues (
+      alias        TEXT PRIMARY KEY,   -- normalized lowercase: 'liga mx', 'epl', 'laliga'
+      league_slug  TEXT NOT NULL,      -- ESPN API slug: 'mex.1', 'eng.1', 'nba'
+      sport        TEXT NOT NULL       -- ESPN sport path: 'soccer', 'basketball', 'football', 'baseball', 'hockey'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_espn_leagues_slug ON espn_leagues(league_slug);
+
+    -- Team aliases → league slug + ESPN team ID (replaces TEAM_LEAGUE_MAP + TEAM_ID_MAP)
+    CREATE TABLE IF NOT EXISTS espn_teams (
+      alias        TEXT PRIMARY KEY,   -- normalized lowercase: 'atlas', 'zorros', 'man city'
+      canonical    TEXT NOT NULL,      -- canonical team name: 'atlas', 'manchester city'
+      league_slug  TEXT NOT NULL,      -- ESPN league slug: 'mex.1', 'eng.1'
+      espn_id      TEXT               -- ESPN team ID (nullable — not all teams have one yet)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_espn_teams_canonical ON espn_teams(canonical);
+    CREATE INDEX IF NOT EXISTS idx_espn_teams_league ON espn_teams(league_slug);
   `)
 
   // ── Schema migrations ──────────────────────────────────────────────────────
@@ -161,6 +188,11 @@ export function getDb(): Database.Database {
   // ── Seed memory_aliases from canonical maps ────────────────────────────────
 
   seedAliases(db)
+
+  // ── Seed ESPN catalog tables ───────────────────────────────────────────────
+
+  seedEspnLeagues(db)
+  seedEspnTeams(db)
 
   // ── Migrate user_preferences → memories ───────────────────────────────────
 
@@ -178,134 +210,234 @@ export function closeDb(): void {
 
 // ── Seed aliases ──────────────────────────────────────────────────────────────
 //
-// These are the same canonical maps that lived in preferences.ts.
-// Storing them in the DB makes them editable at runtime without a deploy.
-// INSERT OR IGNORE — safe to run on every startup.
+// Loaded from src/seeds/aliases.json — edit the JSON to add new aliases
+// without touching TypeScript source. INSERT OR IGNORE — safe on every startup.
 
-const ALIAS_SEED: { alias: string; canonical: string; type: string }[] = [
-  // Teams — Liga MX
-  { alias: 'atlas', canonical: 'atlas', type: 'preference' },
-  { alias: 'zorros', canonical: 'atlas', type: 'preference' },
-  { alias: 'america', canonical: 'america', type: 'preference' },
-  { alias: 'aguilas', canonical: 'america', type: 'preference' },
-  { alias: 'club america', canonical: 'america', type: 'preference' },
-  { alias: 'chivas', canonical: 'chivas', type: 'preference' },
-  { alias: 'guadalajara', canonical: 'chivas', type: 'preference' },
-  { alias: 'rebano', canonical: 'chivas', type: 'preference' },
-  { alias: 'cruz azul', canonical: 'cruz azul', type: 'preference' },
-  { alias: 'la maquina', canonical: 'cruz azul', type: 'preference' },
-  { alias: 'pumas', canonical: 'pumas', type: 'preference' },
-  { alias: 'pumas unam', canonical: 'pumas', type: 'preference' },
-  { alias: 'tigres', canonical: 'tigres', type: 'preference' },
-  { alias: 'tigres uanl', canonical: 'tigres', type: 'preference' },
-  { alias: 'monterrey', canonical: 'monterrey', type: 'preference' },
-  { alias: 'rayados', canonical: 'monterrey', type: 'preference' },
-  { alias: 'toluca', canonical: 'toluca', type: 'preference' },
-  { alias: 'diablos rojos', canonical: 'toluca', type: 'preference' },
-  { alias: 'pachuca', canonical: 'pachuca', type: 'preference' },
-  { alias: 'tuzos', canonical: 'pachuca', type: 'preference' },
-  { alias: 'santos', canonical: 'santos laguna', type: 'preference' },
-  { alias: 'santos laguna', canonical: 'santos laguna', type: 'preference' },
-  { alias: 'leon', canonical: 'leon', type: 'preference' },
-  { alias: 'necaxa', canonical: 'necaxa', type: 'preference' },
-  { alias: 'rayos', canonical: 'necaxa', type: 'preference' },
-  { alias: 'puebla', canonical: 'puebla', type: 'preference' },
-  { alias: 'camoteros', canonical: 'puebla', type: 'preference' },
-  { alias: 'queretaro', canonical: 'queretaro', type: 'preference' },
-  { alias: 'gallos', canonical: 'queretaro', type: 'preference' },
-  { alias: 'tijuana', canonical: 'tijuana', type: 'preference' },
-  { alias: 'xolos', canonical: 'tijuana', type: 'preference' },
-  { alias: 'juarez', canonical: 'juarez', type: 'preference' },
-  { alias: 'bravos', canonical: 'juarez', type: 'preference' },
-  // Teams — LaLiga
-  { alias: 'barcelona', canonical: 'barcelona', type: 'preference' },
-  { alias: 'real madrid', canonical: 'real madrid', type: 'preference' },
-  { alias: 'atletico madrid', canonical: 'atletico madrid', type: 'preference' },
-  // Teams — EPL
-  { alias: 'manchester city', canonical: 'manchester city', type: 'preference' },
-  { alias: 'man city', canonical: 'manchester city', type: 'preference' },
-  { alias: 'arsenal', canonical: 'arsenal', type: 'preference' },
-  { alias: 'liverpool', canonical: 'liverpool', type: 'preference' },
-  { alias: 'chelsea', canonical: 'chelsea', type: 'preference' },
-  { alias: 'manchester united', canonical: 'manchester united', type: 'preference' },
-  { alias: 'man united', canonical: 'manchester united', type: 'preference' },
-  { alias: 'tottenham', canonical: 'tottenham', type: 'preference' },
-  { alias: 'spurs', canonical: 'tottenham', type: 'preference' },
-  // Teams — NBA
-  { alias: 'lakers', canonical: 'lakers', type: 'preference' },
-  { alias: 'los angeles lakers', canonical: 'lakers', type: 'preference' },
-  { alias: 'celtics', canonical: 'celtics', type: 'preference' },
-  { alias: 'warriors', canonical: 'warriors', type: 'preference' },
-  { alias: 'bulls', canonical: 'bulls', type: 'preference' },
-  // Leagues
-  { alias: 'liga mx', canonical: 'liga mx', type: 'preference' },
-  { alias: 'ligamx', canonical: 'liga mx', type: 'preference' },
-  { alias: 'liga mexicana', canonical: 'liga mx', type: 'preference' },
-  { alias: 'premier league', canonical: 'premier league', type: 'preference' },
-  { alias: 'epl', canonical: 'premier league', type: 'preference' },
-  { alias: 'premier', canonical: 'premier league', type: 'preference' },
-  { alias: 'la liga', canonical: 'la liga', type: 'preference' },
-  { alias: 'laliga', canonical: 'la liga', type: 'preference' },
-  { alias: 'serie a', canonical: 'serie a', type: 'preference' },
-  { alias: 'bundesliga', canonical: 'bundesliga', type: 'preference' },
-  { alias: 'ligue 1', canonical: 'ligue 1', type: 'preference' },
-  { alias: 'champions league', canonical: 'champions league', type: 'preference' },
-  { alias: 'champions', canonical: 'champions league', type: 'preference' },
-  { alias: 'ucl', canonical: 'champions league', type: 'preference' },
-  { alias: 'copa libertadores', canonical: 'copa libertadores', type: 'preference' },
-  { alias: 'libertadores', canonical: 'copa libertadores', type: 'preference' },
-  { alias: 'nba', canonical: 'nba', type: 'preference' },
-  { alias: 'nfl', canonical: 'nfl', type: 'preference' },
-  { alias: 'mlb', canonical: 'mlb', type: 'preference' },
-  { alias: 'nhl', canonical: 'nhl', type: 'preference' },
-  { alias: 'mls', canonical: 'mls', type: 'preference' },
-  // Sports
-  { alias: 'futbol', canonical: 'futbol', type: 'preference' },
-  { alias: 'soccer', canonical: 'futbol', type: 'preference' },
-  { alias: 'football', canonical: 'futbol', type: 'preference' },
-  { alias: 'basketball', canonical: 'basketball', type: 'preference' },
-  { alias: 'basquetbol', canonical: 'basketball', type: 'preference' },
-  { alias: 'baseball', canonical: 'baseball', type: 'preference' },
-  { alias: 'beisbol', canonical: 'baseball', type: 'preference' },
-  { alias: 'hockey', canonical: 'hockey', type: 'preference' },
-  { alias: 'tenis', canonical: 'tenis', type: 'preference' },
-  { alias: 'tennis', canonical: 'tenis', type: 'preference' },
-  { alias: 'futbol americano', canonical: 'futbol americano', type: 'preference' },
-  // Tech stack aliases
-  { alias: 'c#', canonical: 'dotnet', type: 'tech_stack' },
-  { alias: 'csharp', canonical: 'dotnet', type: 'tech_stack' },
-  { alias: '.net', canonical: 'dotnet', type: 'tech_stack' },
-  { alias: 'dotnet', canonical: 'dotnet', type: 'tech_stack' },
-  { alias: 'asp.net', canonical: 'dotnet', type: 'tech_stack' },
-  { alias: 'node', canonical: 'nodejs', type: 'tech_stack' },
-  { alias: 'node.js', canonical: 'nodejs', type: 'tech_stack' },
-  { alias: 'nodejs', canonical: 'nodejs', type: 'tech_stack' },
-  { alias: 'js', canonical: 'javascript', type: 'tech_stack' },
-  { alias: 'javascript', canonical: 'javascript', type: 'tech_stack' },
-  { alias: 'ts', canonical: 'typescript', type: 'tech_stack' },
-  { alias: 'typescript', canonical: 'typescript', type: 'tech_stack' },
-  { alias: 'react.js', canonical: 'react', type: 'tech_stack' },
-  { alias: 'react', canonical: 'react', type: 'tech_stack' },
-  { alias: 'vue.js', canonical: 'vue', type: 'tech_stack' },
-  { alias: 'vue', canonical: 'vue', type: 'tech_stack' },
-  { alias: 'k8s', canonical: 'kubernetes', type: 'tech_stack' },
-  { alias: 'kubernetes', canonical: 'kubernetes', type: 'tech_stack' },
-  { alias: 'postgres', canonical: 'postgresql', type: 'tech_stack' },
-  { alias: 'postgresql', canonical: 'postgresql', type: 'tech_stack' },
-  { alias: 'py', canonical: 'python', type: 'tech_stack' },
-  { alias: 'python', canonical: 'python', type: 'tech_stack' },
-]
+type AliasSeedRow = { alias: string; canonical: string; type: string }
 
 function seedAliases(database: Database.Database): void {
+  const seedPath = path.resolve(path.dirname(_require.resolve('../memory/database.js')), '../seeds/aliases.json')
+  let rows: AliasSeedRow[] = []
+  try {
+    rows = JSON.parse(fs.readFileSync(seedPath, 'utf-8')) as AliasSeedRow[]
+  } catch {
+    // File not found or parse error — skip seeding gracefully
+    return
+  }
   const insert = database.prepare(
     'INSERT OR IGNORE INTO memory_aliases (alias, canonical, type) VALUES (?, ?, ?)',
   )
-  const insertMany = database.transaction((rows: typeof ALIAS_SEED) => {
-    for (const row of rows) {
+  const insertMany = database.transaction((data: AliasSeedRow[]) => {
+    for (const row of data) {
       insert.run(row.alias.toLowerCase(), row.canonical.toLowerCase(), row.type)
     }
   })
-  insertMany(ALIAS_SEED)
+  insertMany(rows)
+}
+
+// ── ESPN leagues seed ─────────────────────────────────────────────────────────
+//
+// Replaces LEAGUE_MAP + LEAGUE_SPORT_MAP in espn.ts.
+// INSERT OR IGNORE — safe to run on every startup. Add new leagues here only.
+
+const ESPN_LEAGUES_SEED: { alias: string; league_slug: string; sport: string }[] = [
+  // Liga MX
+  { alias: 'liga mx', league_slug: 'mex.1', sport: 'soccer' },
+  { alias: 'ligamx', league_slug: 'mex.1', sport: 'soccer' },
+  { alias: 'liga mexicana', league_slug: 'mex.1', sport: 'soccer' },
+  { alias: 'primera división de mexico', league_slug: 'mex.1', sport: 'soccer' },
+  { alias: 'primera division de mexico', league_slug: 'mex.1', sport: 'soccer' },
+  { alias: 'mexico', league_slug: 'mex.1', sport: 'soccer' },
+  // MLS
+  { alias: 'mls', league_slug: 'usa.1', sport: 'soccer' },
+  { alias: 'major league soccer', league_slug: 'usa.1', sport: 'soccer' },
+  { alias: 'liga americana', league_slug: 'usa.1', sport: 'soccer' },
+  // Premier League
+  { alias: 'premier league', league_slug: 'eng.1', sport: 'soccer' },
+  { alias: 'premier', league_slug: 'eng.1', sport: 'soccer' },
+  { alias: 'epl', league_slug: 'eng.1', sport: 'soccer' },
+  { alias: 'liga inglesa', league_slug: 'eng.1', sport: 'soccer' },
+  { alias: 'england', league_slug: 'eng.1', sport: 'soccer' },
+  { alias: 'inglaterra', league_slug: 'eng.1', sport: 'soccer' },
+  // La Liga
+  { alias: 'la liga', league_slug: 'esp.1', sport: 'soccer' },
+  { alias: 'laliga', league_slug: 'esp.1', sport: 'soccer' },
+  { alias: 'liga española', league_slug: 'esp.1', sport: 'soccer' },
+  { alias: 'liga espanola', league_slug: 'esp.1', sport: 'soccer' },
+  { alias: 'españa', league_slug: 'esp.1', sport: 'soccer' },
+  { alias: 'spain', league_slug: 'esp.1', sport: 'soccer' },
+  // Serie A
+  { alias: 'serie a', league_slug: 'ita.1', sport: 'soccer' },
+  { alias: 'liga italiana', league_slug: 'ita.1', sport: 'soccer' },
+  { alias: 'italia', league_slug: 'ita.1', sport: 'soccer' },
+  { alias: 'italy', league_slug: 'ita.1', sport: 'soccer' },
+  // Bundesliga
+  { alias: 'bundesliga', league_slug: 'ger.1', sport: 'soccer' },
+  { alias: 'liga alemana', league_slug: 'ger.1', sport: 'soccer' },
+  { alias: 'alemania', league_slug: 'ger.1', sport: 'soccer' },
+  { alias: 'germany', league_slug: 'ger.1', sport: 'soccer' },
+  // Ligue 1
+  { alias: 'ligue 1', league_slug: 'fra.1', sport: 'soccer' },
+  { alias: 'ligue1', league_slug: 'fra.1', sport: 'soccer' },
+  { alias: 'liga francesa', league_slug: 'fra.1', sport: 'soccer' },
+  { alias: 'francia', league_slug: 'fra.1', sport: 'soccer' },
+  { alias: 'france', league_slug: 'fra.1', sport: 'soccer' },
+  // Champions League
+  { alias: 'champions league', league_slug: 'uefa.champions', sport: 'soccer' },
+  { alias: 'champions', league_slug: 'uefa.champions', sport: 'soccer' },
+  { alias: 'ucl', league_slug: 'uefa.champions', sport: 'soccer' },
+  { alias: 'liga de campeones', league_slug: 'uefa.champions', sport: 'soccer' },
+  { alias: 'champions league europea', league_slug: 'uefa.champions', sport: 'soccer' },
+  // Copa Libertadores
+  { alias: 'libertadores', league_slug: 'conmebol.libertadores', sport: 'soccer' },
+  { alias: 'copa libertadores', league_slug: 'conmebol.libertadores', sport: 'soccer' },
+  { alias: 'conmebol libertadores', league_slug: 'conmebol.libertadores', sport: 'soccer' },
+  // Liga Argentina
+  { alias: 'liga argentina', league_slug: 'arg.1', sport: 'soccer' },
+  { alias: 'argentina', league_slug: 'arg.1', sport: 'soccer' },
+  { alias: 'primera argentina', league_slug: 'arg.1', sport: 'soccer' },
+  // NBA
+  { alias: 'nba', league_slug: 'nba', sport: 'basketball' },
+  { alias: 'basketball', league_slug: 'nba', sport: 'basketball' },
+  { alias: 'basquetbol', league_slug: 'nba', sport: 'basketball' },
+  { alias: 'basquetball', league_slug: 'nba', sport: 'basketball' },
+  // NFL
+  { alias: 'nfl', league_slug: 'nfl', sport: 'football' },
+  { alias: 'football americano', league_slug: 'nfl', sport: 'football' },
+  { alias: 'futbol americano', league_slug: 'nfl', sport: 'football' },
+  // MLB
+  { alias: 'mlb', league_slug: 'mlb', sport: 'baseball' },
+  { alias: 'baseball', league_slug: 'mlb', sport: 'baseball' },
+  { alias: 'beisbol', league_slug: 'mlb', sport: 'baseball' },
+  { alias: 'béisbol', league_slug: 'mlb', sport: 'baseball' },
+  // NHL
+  { alias: 'nhl', league_slug: 'nhl', sport: 'hockey' },
+  { alias: 'hockey', league_slug: 'nhl', sport: 'hockey' },
+]
+
+function seedEspnLeagues(database: Database.Database): void {
+  const insert = database.prepare(
+    'INSERT OR IGNORE INTO espn_leagues (alias, league_slug, sport) VALUES (?, ?, ?)',
+  )
+  const insertMany = database.transaction((rows: typeof ESPN_LEAGUES_SEED) => {
+    for (const row of rows) {
+      insert.run(row.alias.toLowerCase(), row.league_slug, row.sport)
+    }
+  })
+  insertMany(ESPN_LEAGUES_SEED)
+}
+
+// ── ESPN teams seed ───────────────────────────────────────────────────────────
+//
+// Replaces TEAM_LEAGUE_MAP + TEAM_ID_MAP in espn.ts.
+// canonical = the canonical team name used by ESPN (used to group aliases).
+// espn_id = numeric ESPN team ID (NULL for leagues/teams not yet mapped).
+
+const ESPN_TEAMS_SEED: { alias: string; canonical: string; league_slug: string; espn_id: string | null }[] = [
+  // ── Liga MX ──────────────────────────────────────────────────────────────
+  { alias: 'america', canonical: 'america', league_slug: 'mex.1', espn_id: '227' },
+  { alias: 'águilas', canonical: 'america', league_slug: 'mex.1', espn_id: '227' },
+  { alias: 'aguilas', canonical: 'america', league_slug: 'mex.1', espn_id: '227' },
+  { alias: 'club america', canonical: 'america', league_slug: 'mex.1', espn_id: '227' },
+  { alias: 'atlas', canonical: 'atlas', league_slug: 'mex.1', espn_id: '216' },
+  { alias: 'zorros', canonical: 'atlas', league_slug: 'mex.1', espn_id: '216' },
+  { alias: 'chivas', canonical: 'chivas', league_slug: 'mex.1', espn_id: '219' },
+  { alias: 'guadalajara', canonical: 'chivas', league_slug: 'mex.1', espn_id: '219' },
+  { alias: 'rebaño', canonical: 'chivas', league_slug: 'mex.1', espn_id: '219' },
+  { alias: 'rebano', canonical: 'chivas', league_slug: 'mex.1', espn_id: '219' },
+  { alias: 'cruz azul', canonical: 'cruz azul', league_slug: 'mex.1', espn_id: '218' },
+  { alias: 'la maquina', canonical: 'cruz azul', league_slug: 'mex.1', espn_id: '218' },
+  { alias: 'la máquina', canonical: 'cruz azul', league_slug: 'mex.1', espn_id: '218' },
+  { alias: 'pumas', canonical: 'pumas', league_slug: 'mex.1', espn_id: '233' },
+  { alias: 'pumas unam', canonical: 'pumas', league_slug: 'mex.1', espn_id: '233' },
+  { alias: 'tigres', canonical: 'tigres', league_slug: 'mex.1', espn_id: '232' },
+  { alias: 'tigres uanl', canonical: 'tigres', league_slug: 'mex.1', espn_id: '232' },
+  { alias: 'monterrey', canonical: 'monterrey', league_slug: 'mex.1', espn_id: '220' },
+  { alias: 'rayados', canonical: 'monterrey', league_slug: 'mex.1', espn_id: '220' },
+  { alias: 'toluca', canonical: 'toluca', league_slug: 'mex.1', espn_id: '223' },
+  { alias: 'diablos rojos', canonical: 'toluca', league_slug: 'mex.1', espn_id: '223' },
+  { alias: 'pachuca', canonical: 'pachuca', league_slug: 'mex.1', espn_id: '234' },
+  { alias: 'tuzos', canonical: 'pachuca', league_slug: 'mex.1', espn_id: '234' },
+  { alias: 'santos', canonical: 'santos laguna', league_slug: 'mex.1', espn_id: '225' },
+  { alias: 'santos laguna', canonical: 'santos laguna', league_slug: 'mex.1', espn_id: '225' },
+  { alias: 'guerreros', canonical: 'santos laguna', league_slug: 'mex.1', espn_id: '225' },
+  { alias: 'leon', canonical: 'leon', league_slug: 'mex.1', espn_id: '228' },
+  { alias: 'león', canonical: 'leon', league_slug: 'mex.1', espn_id: '228' },
+  { alias: 'necaxa', canonical: 'necaxa', league_slug: 'mex.1', espn_id: '229' },
+  { alias: 'rayos', canonical: 'necaxa', league_slug: 'mex.1', espn_id: '229' },
+  { alias: 'puebla', canonical: 'puebla', league_slug: 'mex.1', espn_id: '231' },
+  { alias: 'camoteros', canonical: 'puebla', league_slug: 'mex.1', espn_id: '231' },
+  { alias: 'queretaro', canonical: 'queretaro', league_slug: 'mex.1', espn_id: '222' },
+  { alias: 'querétaro', canonical: 'queretaro', league_slug: 'mex.1', espn_id: '222' },
+  { alias: 'gallos', canonical: 'queretaro', league_slug: 'mex.1', espn_id: '222' },
+  { alias: 'tijuana', canonical: 'tijuana', league_slug: 'mex.1', espn_id: '10125' },
+  { alias: 'xolos', canonical: 'tijuana', league_slug: 'mex.1', espn_id: '10125' },
+  { alias: 'juarez', canonical: 'juarez', league_slug: 'mex.1', espn_id: '17851' },
+  { alias: 'juárez', canonical: 'juarez', league_slug: 'mex.1', espn_id: '17851' },
+  { alias: 'bravos', canonical: 'juarez', league_slug: 'mex.1', espn_id: '17851' },
+  { alias: 'mazatlan', canonical: 'mazatlan', league_slug: 'mex.1', espn_id: '20702' },
+  { alias: 'mazatlán', canonical: 'mazatlan', league_slug: 'mex.1', espn_id: '20702' },
+  { alias: 'san luis', canonical: 'atletico san luis', league_slug: 'mex.1', espn_id: '15720' },
+  { alias: 'atletico san luis', canonical: 'atletico san luis', league_slug: 'mex.1', espn_id: '15720' },
+  { alias: 'atlético san luis', canonical: 'atletico san luis', league_slug: 'mex.1', espn_id: '15720' },
+  // ── La Liga ───────────────────────────────────────────────────────────────
+  { alias: 'barcelona', canonical: 'barcelona', league_slug: 'esp.1', espn_id: null },
+  { alias: 'real madrid', canonical: 'real madrid', league_slug: 'esp.1', espn_id: null },
+  { alias: 'atletico madrid', canonical: 'atletico madrid', league_slug: 'esp.1', espn_id: null },
+  { alias: 'atlético madrid', canonical: 'atletico madrid', league_slug: 'esp.1', espn_id: null },
+  { alias: 'sevilla', canonical: 'sevilla', league_slug: 'esp.1', espn_id: null },
+  { alias: 'valencia', canonical: 'valencia', league_slug: 'esp.1', espn_id: null },
+  { alias: 'villarreal', canonical: 'villarreal', league_slug: 'esp.1', espn_id: null },
+  { alias: 'athletic club', canonical: 'athletic club', league_slug: 'esp.1', espn_id: null },
+  { alias: 'real sociedad', canonical: 'real sociedad', league_slug: 'esp.1', espn_id: null },
+  // ── Premier League ────────────────────────────────────────────────────────
+  { alias: 'manchester city', canonical: 'manchester city', league_slug: 'eng.1', espn_id: null },
+  { alias: 'man city', canonical: 'manchester city', league_slug: 'eng.1', espn_id: null },
+  { alias: 'arsenal', canonical: 'arsenal', league_slug: 'eng.1', espn_id: null },
+  { alias: 'liverpool', canonical: 'liverpool', league_slug: 'eng.1', espn_id: null },
+  { alias: 'chelsea', canonical: 'chelsea', league_slug: 'eng.1', espn_id: null },
+  { alias: 'manchester united', canonical: 'manchester united', league_slug: 'eng.1', espn_id: null },
+  { alias: 'man united', canonical: 'manchester united', league_slug: 'eng.1', espn_id: null },
+  { alias: 'tottenham', canonical: 'tottenham', league_slug: 'eng.1', espn_id: null },
+  { alias: 'spurs', canonical: 'tottenham', league_slug: 'eng.1', espn_id: null },
+  { alias: 'newcastle', canonical: 'newcastle', league_slug: 'eng.1', espn_id: null },
+  { alias: 'aston villa', canonical: 'aston villa', league_slug: 'eng.1', espn_id: null },
+  // ── Serie A ───────────────────────────────────────────────────────────────
+  { alias: 'juventus', canonical: 'juventus', league_slug: 'ita.1', espn_id: null },
+  { alias: 'inter', canonical: 'inter', league_slug: 'ita.1', espn_id: null },
+  { alias: 'milan', canonical: 'milan', league_slug: 'ita.1', espn_id: null },
+  { alias: 'napoli', canonical: 'napoli', league_slug: 'ita.1', espn_id: null },
+  { alias: 'roma', canonical: 'roma', league_slug: 'ita.1', espn_id: null },
+  { alias: 'lazio', canonical: 'lazio', league_slug: 'ita.1', espn_id: null },
+  // ── Bundesliga ────────────────────────────────────────────────────────────
+  { alias: 'bayern', canonical: 'bayern munich', league_slug: 'ger.1', espn_id: null },
+  { alias: 'bayern munich', canonical: 'bayern munich', league_slug: 'ger.1', espn_id: null },
+  { alias: 'dortmund', canonical: 'borussia dortmund', league_slug: 'ger.1', espn_id: null },
+  { alias: 'borussia dortmund', canonical: 'borussia dortmund', league_slug: 'ger.1', espn_id: null },
+  { alias: 'bayer leverkusen', canonical: 'bayer leverkusen', league_slug: 'ger.1', espn_id: null },
+  // ── NBA ───────────────────────────────────────────────────────────────────
+  { alias: 'lakers', canonical: 'los angeles lakers', league_slug: 'nba', espn_id: null },
+  { alias: 'los angeles lakers', canonical: 'los angeles lakers', league_slug: 'nba', espn_id: null },
+  { alias: 'celtics', canonical: 'celtics', league_slug: 'nba', espn_id: null },
+  { alias: 'warriors', canonical: 'warriors', league_slug: 'nba', espn_id: null },
+  { alias: 'bulls', canonical: 'bulls', league_slug: 'nba', espn_id: null },
+  { alias: 'heat', canonical: 'heat', league_slug: 'nba', espn_id: null },
+  { alias: 'nets', canonical: 'nets', league_slug: 'nba', espn_id: null },
+  { alias: 'knicks', canonical: 'knicks', league_slug: 'nba', espn_id: null },
+  { alias: 'san antonio spurs', canonical: 'san antonio spurs', league_slug: 'nba', espn_id: null },
+  { alias: 'suns', canonical: 'suns', league_slug: 'nba', espn_id: null },
+]
+
+function seedEspnTeams(database: Database.Database): void {
+  const insert = database.prepare(
+    'INSERT OR IGNORE INTO espn_teams (alias, canonical, league_slug, espn_id) VALUES (?, ?, ?, ?)',
+  )
+  const insertMany = database.transaction((rows: typeof ESPN_TEAMS_SEED) => {
+    for (const row of rows) {
+      insert.run(row.alias.toLowerCase(), row.canonical.toLowerCase(), row.league_slug, row.espn_id)
+    }
+  })
+  insertMany(ESPN_TEAMS_SEED)
 }
 
 // ── Migrate user_preferences → memories ──────────────────────────────────────

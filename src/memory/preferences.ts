@@ -48,48 +48,8 @@ const CATEGORY_HINTS: { pattern: RegExp; category: PreferenceCategory }[] = [
   { pattern: /\b(jugador|player|atleta|athlete)\b/i, category: 'player' },
 ]
 
-// Team name → canonical lookup (reuse ESPN team names)
-const TEAM_CANONICAL: Record<string, string> = {
-  'atlas': 'atlas', 'zorros': 'atlas',
-  'america': 'america', 'águilas': 'america', 'aguilas': 'america', 'club america': 'america',
-  'chivas': 'chivas', 'guadalajara': 'chivas', 'rebaño': 'chivas',
-  'cruz azul': 'cruz azul', 'la maquina': 'cruz azul',
-  'pumas': 'pumas', 'pumas unam': 'pumas',
-  'tigres': 'tigres', 'tigres uanl': 'tigres',
-  'monterrey': 'monterrey', 'rayados': 'monterrey',
-  'toluca': 'toluca', 'diablos rojos': 'toluca',
-  'pachuca': 'pachuca', 'tuzos': 'pachuca',
-  'santos': 'santos laguna', 'santos laguna': 'santos laguna',
-  'leon': 'leon', 'léon': 'leon',
-  'necaxa': 'necaxa', 'rayos': 'necaxa',
-  'puebla': 'puebla', 'camoteros': 'puebla',
-  'queretaro': 'queretaro', 'querétaro': 'queretaro', 'gallos': 'queretaro',
-  'tijuana': 'tijuana', 'xolos': 'tijuana',
-  'juarez': 'juarez', 'bravos': 'juarez',
-  // LaLiga
-  'barcelona': 'barcelona', 'real madrid': 'real madrid', 'atletico madrid': 'atletico madrid',
-  // EPL
-  'manchester city': 'manchester city', 'man city': 'manchester city',
-  'arsenal': 'arsenal', 'liverpool': 'liverpool', 'chelsea': 'chelsea',
-  'manchester united': 'manchester united', 'man united': 'manchester united',
-  'tottenham': 'tottenham', 'spurs': 'tottenham',
-  // NBA
-  'lakers': 'lakers', 'los angeles lakers': 'lakers',
-  'celtics': 'celtics', 'warriors': 'warriors', 'bulls': 'bulls',
-}
-
-const LEAGUE_CANONICAL: Record<string, string> = {
-  'liga mx': 'liga mx', 'ligamx': 'liga mx', 'liga mexicana': 'liga mx',
-  'premier league': 'premier league', 'epl': 'premier league', 'premier': 'premier league',
-  'la liga': 'la liga', 'laliga': 'la liga',
-  'serie a': 'serie a',
-  'bundesliga': 'bundesliga',
-  'ligue 1': 'ligue 1',
-  'champions league': 'champions league', 'ucl': 'champions league', 'champions': 'champions league',
-  'copa libertadores': 'copa libertadores', 'libertadores': 'copa libertadores',
-  'nba': 'nba', 'nfl': 'nfl', 'mlb': 'mlb', 'nhl': 'nhl', 'mls': 'mls',
-}
-
+// Known sports canonical values (for sport detection in extractPreferencesFromQuery)
+// These are stable sport names — not dependent on external APIs, kept in code intentionally.
 const SPORT_CANONICAL: Record<string, string> = {
   'futbol': 'futbol', 'fútbol': 'futbol', 'soccer': 'futbol', 'football': 'futbol',
   'basketball': 'basketball', 'basquetbol': 'basketball', 'basquetball': 'basketball',
@@ -111,7 +71,8 @@ function escapeRegex(s: string): string {
 
 /**
  * Attempt to extract preference(s) from a natural language query.
- * Returns an array of extracted preferences (may be empty if none found).
+ * Teams and leagues are resolved from espn_teams / espn_leagues DB tables.
+ * Sports are resolved from the local SPORT_CANONICAL map (stable, no API dependency).
  */
 export function extractPreferencesFromQuery(query: string): ExtractedPreference[] {
   const q = query.toLowerCase().trim()
@@ -120,38 +81,41 @@ export function extractPreferencesFromQuery(query: string): ExtractedPreference[
   const hasPreferenceTrigger = PREFERENCE_TRIGGERS.some((p) => p.test(q))
   if (!hasPreferenceTrigger) return []
 
+  const db = getDb()
   const results: ExtractedPreference[] = []
 
-  // Sorted by keyword length descending so longer/more-specific matches win first
-  // (e.g. "liga mx" before "la liga", "champions league" before "champions")
-  const sortedLeagues = Object.entries(LEAGUE_CANONICAL).sort((a, b) => b[0].length - a[0].length)
-  const sortedTeams = Object.entries(TEAM_CANONICAL).sort((a, b) => b[0].length - a[0].length)
+  // ── Teams — query espn_teams table ──────────────────────────────────────
+  const teamRows = db
+    .prepare('SELECT alias, canonical FROM espn_teams ORDER BY length(alias) DESC')
+    .all() as { alias: string; canonical: string }[]
 
-  // Try to detect teams
-  for (const [keyword, canonical] of sortedTeams) {
-    const re = new RegExp(`(?<![a-záéíóúüñ])${escapeRegex(keyword)}(?![a-záéíóúüñ])`, 'i')
+  for (const row of teamRows) {
+    const re = new RegExp(`(?<![a-záéíóúüñ])${escapeRegex(row.alias)}(?![a-záéíóúüñ])`, 'i')
     if (re.test(q)) {
-      if (!results.some((r) => r.category === 'team' && r.value === canonical)) {
-        results.push({ category: 'team', value: canonical, label: keyword })
+      if (!results.some((r) => r.category === 'team' && r.value === row.canonical)) {
+        results.push({ category: 'team', value: row.canonical, label: row.alias })
       }
     }
   }
 
-  // Try to detect leagues — use a mutable copy so matched text is consumed
-  // (prevents "la liga mx" from matching both "liga mx" AND "la liga")
+  // ── Leagues — query espn_leagues table ───────────────────────────────────
+  // Use a mutable copy to prevent "liga mx" also matching "la liga" on the same query
+  const leagueRows = db
+    .prepare('SELECT alias, league_slug FROM espn_leagues ORDER BY length(alias) DESC')
+    .all() as { alias: string; league_slug: string }[]
+
   let qLeague = q
-  for (const [keyword, canonical] of sortedLeagues) {
-    const re = new RegExp(`(?<![a-záéíóúüñ])${escapeRegex(keyword)}(?![a-záéíóúüñ])`, 'i')
+  for (const row of leagueRows) {
+    const re = new RegExp(`(?<![a-záéíóúüñ])${escapeRegex(row.alias)}(?![a-záéíóúüñ])`, 'i')
     if (re.test(qLeague)) {
-      if (!results.some((r) => r.category === 'league' && r.value === canonical)) {
-        results.push({ category: 'league', value: canonical, label: keyword })
-        // Mask matched text so shorter overlapping keywords don't also match
-        qLeague = qLeague.replace(re, ' '.repeat(keyword.length))
+      if (!results.some((r) => r.category === 'league' && r.value === row.league_slug)) {
+        results.push({ category: 'league', value: row.league_slug, label: row.alias })
+        qLeague = qLeague.replace(re, ' '.repeat(row.alias.length))
       }
     }
   }
 
-  // Try to detect sports
+  // ── Sports — local map (stable, no API needed) ────────────────────────────
   for (const [keyword, canonical] of Object.entries(SPORT_CANONICAL)) {
     const re = new RegExp(`(?<![a-záéíóúüñ])${escapeRegex(keyword)}(?![a-záéíóúüñ])`, 'i')
     if (re.test(q)) {
@@ -234,3 +198,4 @@ export function buildPreferenceSavedMessage(saved: ExtractedPreference[]): strin
   })
   return `Guardé tus preferencias:\n${parts.join('\n')}\n\nLas tendré en cuenta en futuras consultas deportivas.`
 }
+

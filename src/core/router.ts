@@ -1,12 +1,13 @@
 import { normalizeQuery } from '../utils/normalize.js'
 import { getRouterClient } from './llm-client.js'
 import { debugLog } from '../utils/debug.js'
+import { getSportsAliases } from '../memory/memory-store.js'
 
 const ROUTER_SYSTEM_PROMPT = `You are a strict tool router.
 Your job is to classify the user query into exactly one of three options.
 
 Available tools:
-- webSearch: use ONLY when the query requires information from after September 2023, real-time data (prices, scores), or unknown entities.
+- webSearch: use ONLY when the query requires real-time data (prices, scores, current events, recent news) or information about events that may have happened recently.
 - getDateTime: use ONLY when the user explicitly asks for the current date or time.
 - getWeather: use ONLY when the user asks about current weather, temperature, forecast, rain, or climate conditions.
 - sportsQuery: use ONLY for sports-related queries that likely require up-to-date information, such as scores, standings, or upcoming matches.
@@ -17,8 +18,8 @@ Rules:
 - Jokes, wordplay, riddles, conversational messages → always "none"  
 - Reasoning verifiable internally (anagrams, palindromes, math) → always "none"
 - Programming questions, code generation, tutorials → always "none"
-- Your knowledge cutoff is September 2023. Anything after that → "webSearch"
-- Only use "webSearch" if you are confident the information changes frequently or postdates your knowledge
+- Real-time or recent events (news, prices, scores, standings) → "webSearch" or "sportsQuery"
+- Only use "webSearch" if you are confident the information changes frequently or requires current data
 
 Respond ONLY with valid JSON. No text before or after.
 { "tool": "webSearch" | "getDateTime" | "getWeather" | "none" | "sportsQuery" , "confidence": number }`.trim()
@@ -135,6 +136,22 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(hoy|today|ahora|now|actual|current|últim[oa]s?|latest|reciente|recent|este año|this year|esta semana|this week|ayer|yesterday)(?:\s|$|[?,.])/i, intent: 'webSearch', weight: 3, description: 'recency indicator' },
 ]
 
+// Dynamic signal: "noticias" + known sports alias (from DB) → sportsQuery weight 18
+// Built lazily on first use — DB may not be initialized at module load time.
+let _teamNewsSignal: Signal | null = null
+function getTeamNewsSignal(): Signal {
+  if (_teamNewsSignal) return _teamNewsSignal
+  const aliases = getSportsAliases()
+  const escaped = aliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  _teamNewsSignal = {
+    pattern: new RegExp(`(?:noticias?|news).*\\b(${escaped})\\b|\\b(${escaped})\\b.*(?:noticias?|news)`, 'i'),
+    intent: 'sportsQuery',
+    weight: 18,
+    description: 'news about known sports alias (DB)',
+  }
+  return _teamNewsSignal
+}
+
 function scoreQuery(query: string): Record<RoutingDecision, number> {
   const scores: Record<RoutingDecision, number> = {
     webSearch: 0,
@@ -150,6 +167,13 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
       scores[signal.intent] += signal.weight
       debugLog(`[router] signal match: "${signal.description}" → ${signal.intent} +${signal.weight}`)
     }
+  }
+
+  // Dynamic team-news signal (built from DB aliases, lazy)
+  const teamNewsSignal = getTeamNewsSignal()
+  if (teamNewsSignal.pattern.test(query)) {
+    scores[teamNewsSignal.intent] += teamNewsSignal.weight
+    debugLog(`[router] signal match: "${teamNewsSignal.description}" → ${teamNewsSignal.intent} +${teamNewsSignal.weight}`)
   }
 
   return scores

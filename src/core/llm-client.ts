@@ -1,4 +1,4 @@
-import { loadConfig, DEFAULT_MODEL, ROUTER_MODEL } from '../config/index.js'
+import { loadConfig, DEFAULT_MODEL, ROUTER_MODEL, DEFAULT_OLLAMA_URL } from '../config/index.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -128,7 +128,7 @@ export function getDefaultClient(): LLMClient {
   if (!_defaultClient) {
     const config = loadConfig()
     _defaultClient = createOllamaClient({
-      baseUrl: 'http://localhost:11434',
+      baseUrl: config.ollamaUrl ?? DEFAULT_OLLAMA_URL,
       model: config.model ?? DEFAULT_MODEL,
     })
   }
@@ -138,9 +138,10 @@ export function getDefaultClient(): LLMClient {
 /** Returns the singleton LLMClient for the router (smaller/faster model). */
 export function getRouterClient(): LLMClient {
   if (!_routerClient) {
+    const config = loadConfig()
     _routerClient = createOllamaClient({
-      baseUrl: 'http://localhost:11434',
-      model: ROUTER_MODEL,
+      baseUrl: config.ollamaUrl ?? DEFAULT_OLLAMA_URL,
+      model: config.routerModel ?? ROUTER_MODEL,
     })
   }
   return _routerClient

@@ -18,7 +18,7 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "tsc && cp -r src/seeds dist/seeds",
     "start": "node dist/index.js",
     "commit": "cz",
     "prepare": "husky install",

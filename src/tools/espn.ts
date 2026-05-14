@@ -7,6 +7,7 @@
  */
 
 import { debugLog } from '../utils/debug.js'
+import { getDb } from '../memory/database.js'
 
 import {
   buildCacheKey,
@@ -129,218 +130,70 @@ export interface DateRange {
 }
 
 // ---------------------------------------------------------------------------
-// League / team resolution maps
-// ---------------------------------------------------------------------------
-
-const LEAGUE_MAP: Record<string, string> = {
-  // Liga MX
-  'liga mx': 'mex.1',
-  'ligamx': 'mex.1',
-  'liga mexicana': 'mex.1',
-  'primera división de mexico': 'mex.1',
-  'primera division de mexico': 'mex.1',
-  'mexico': 'mex.1',
-
-  // MLS
-  'mls': 'usa.1',
-  'major league soccer': 'usa.1',
-  'liga americana': 'usa.1',
-
-  // Premier League
-  'premier league': 'eng.1',
-  'premier': 'eng.1',
-  'epl': 'eng.1',
-  'liga inglesa': 'eng.1',
-  'england': 'eng.1',
-  'inglaterra': 'eng.1',
-
-  // La Liga
-  'la liga': 'esp.1',
-  'laliga': 'esp.1',
-  'liga española': 'esp.1',
-  'liga espanola': 'esp.1',
-  'españa': 'esp.1',
-  'spain': 'esp.1',
-
-  // Serie A
-  'serie a': 'ita.1',
-  'liga italiana': 'ita.1',
-  'italia': 'ita.1',
-  'italy': 'ita.1',
-
-  // Bundesliga
-  'bundesliga': 'ger.1',
-  'liga alemana': 'ger.1',
-  'alemania': 'ger.1',
-  'germany': 'ger.1',
-
-  // Ligue 1
-  'ligue 1': 'fra.1',
-  'ligue1': 'fra.1',
-  'liga francesa': 'fra.1',
-  'francia': 'fra.1',
-  'france': 'fra.1',
-
-  // Champions League
-  'champions league': 'uefa.champions',
-  'champions': 'uefa.champions',
-  'ucl': 'uefa.champions',
-  'liga de campeones': 'uefa.champions',
-  'champions league europea': 'uefa.champions',
-
-  // Copa Libertadores
-  'libertadores': 'conmebol.libertadores',
-  'copa libertadores': 'conmebol.libertadores',
-  'conmebol libertadores': 'conmebol.libertadores',
-
-  // Liga Argentina
-  'liga argentina': 'arg.1',
-  'argentina': 'arg.1',
-  'primera argentina': 'arg.1',
-
-  // NBA
-  'nba': 'nba',
-  'basketball': 'nba',
-  'basquetbol': 'nba',
-  'basquetball': 'nba',
-
-  // NFL
-  'nfl': 'nfl',
-  'football americano': 'nfl',
-  'futbol americano': 'nfl',
-
-  // MLB
-  'mlb': 'mlb',
-  'baseball': 'mlb',
-  'beisbol': 'mlb',
-  'béisbol': 'mlb',
-
-  // NHL
-  'nhl': 'nhl',
-  'hockey': 'nhl',
-}
-
-// Sport slug per league (for multi-sport support)
-const LEAGUE_SPORT_MAP: Record<string, string> = {
-  'mex.1': 'soccer',
-  'usa.1': 'soccer',
-  'eng.1': 'soccer',
-  'esp.1': 'soccer',
-  'ita.1': 'soccer',
-  'ger.1': 'soccer',
-  'fra.1': 'soccer',
-  'uefa.champions': 'soccer',
-  'conmebol.libertadores': 'soccer',
-  'arg.1': 'soccer',
-  'nba': 'basketball',
-  'nfl': 'football',
-  'mlb': 'baseball',
-  'nhl': 'hockey',
-}
-
-// Teams mapped to their league (for implicit team queries)
-const TEAM_LEAGUE_MAP: Record<string, string> = {
-  // Liga MX
-  'america': 'mex.1', 'águilas': 'mex.1', 'aguilas': 'mex.1',
-  'chivas': 'mex.1', 'guadalajara': 'mex.1', 'rebaño': 'mex.1', 'rebano': 'mex.1',
-  'cruz azul': 'mex.1', 'la maquina': 'mex.1', 'la máquina': 'mex.1',
-  'pumas': 'mex.1', 'pumas unam': 'mex.1',
-  'tigres': 'mex.1', 'tigres uanl': 'mex.1',
-  'monterrey': 'mex.1', 'rayados': 'mex.1',
-  'atlas': 'mex.1', 'zorros': 'mex.1',
-  'toluca': 'mex.1', 'diablos rojos': 'mex.1',
-  'pachuca': 'mex.1', 'tuzos': 'mex.1',
-  'santos': 'mex.1', 'santos laguna': 'mex.1', 'guerreros': 'mex.1',
-  'leon': 'mex.1', 'león': 'mex.1',
-  'necaxa': 'mex.1', 'rayos': 'mex.1',
-  'puebla': 'mex.1', 'camoteros': 'mex.1',
-  'queretaro': 'mex.1', 'querétaro': 'mex.1', 'gallos': 'mex.1',
-  'tijuana': 'mex.1', 'xolos': 'mex.1',
-  'juarez': 'mex.1', 'juárez': 'mex.1', 'bravos': 'mex.1',
-  'mazatlan': 'mex.1', 'mazatlán': 'mex.1',
-  'san luis': 'mex.1', 'atletico san luis': 'mex.1', 'atlético san luis': 'mex.1',
-  // LaLiga
-  'barcelona': 'esp.1', 'real madrid': 'esp.1', 'atletico madrid': 'esp.1',
-  'atlético madrid': 'esp.1', 'sevilla': 'esp.1', 'valencia': 'esp.1',
-  'villarreal': 'esp.1', 'athletic club': 'esp.1', 'real sociedad': 'esp.1',
-  // Premier League
-  'manchester city': 'eng.1', 'man city': 'eng.1', 'arsenal': 'eng.1',
-  'liverpool': 'eng.1', 'chelsea': 'eng.1', 'manchester united': 'eng.1',
-  'man united': 'eng.1', 'tottenham': 'eng.1', 'spurs': 'eng.1',
-  'newcastle': 'eng.1', 'aston villa': 'eng.1',
-  // Serie A
-  'juventus': 'ita.1', 'inter': 'ita.1', 'milan': 'ita.1', 'napoli': 'ita.1',
-  'roma': 'ita.1', 'lazio': 'ita.1',
-  // Bundesliga
-  'bayern': 'ger.1', 'bayern munich': 'ger.1', 'dortmund': 'ger.1',
-  'borussia dortmund': 'ger.1', 'bayer leverkusen': 'ger.1',
-  // NBA
-  'lakers': 'nba', 'los angeles lakers': 'nba', 'celtics': 'nba',
-  'warriors': 'nba', 'bulls': 'nba', 'heat': 'nba', 'nets': 'nba',
-  'knicks': 'nba', 'san antonio spurs': 'nba', 'suns': 'nba',
-}
-
-// Team name → ESPN team ID (for news/roster endpoints)
-// These are the IDs returned by /teams endpoint
-const TEAM_ID_MAP: Record<string, string> = {
-  // Liga MX
-  'america': '227', 'águilas': '227', 'aguilas': '227',
-  'atlas': '216', 'zorros': '216',
-  'chivas': '219', 'guadalajara': '219',
-  'cruz azul': '218', 'la maquina': '218',
-  'pumas': '233', 'pumas unam': '233',
-  'tigres': '232', 'tigres uanl': '232',
-  'monterrey': '220', 'rayados': '220',
-  'toluca': '223', 'diablos rojos': '223',
-  'pachuca': '234', 'tuzos': '234',
-  'santos': '225', 'santos laguna': '225',
-  'leon': '228', 'león': '228',
-  'necaxa': '229', 'rayos': '229',
-  'puebla': '231', 'camoteros': '231',
-  'queretaro': '222', 'querétaro': '222',
-  'tijuana': '10125', 'xolos': '10125',
-  'juarez': '17851', 'juárez': '17851',
-  'mazatlan': '20702', 'mazatlán': '20702',
-  'san luis': '15720', 'atletico san luis': '15720',
-}
-
-// ---------------------------------------------------------------------------
-// Detection helpers
+// Detection helpers — backed by espn_leagues + espn_teams SQLite tables
 // ---------------------------------------------------------------------------
 
 export function detectLeague(query: string): string | null {
   const q = query.toLowerCase()
-  for (const [keyword, slug] of Object.entries(LEAGUE_MAP)) {
-    if (q.includes(keyword)) {
-      debugLog(`[espn] detectLeague: "${keyword}" → ${slug}`)
-      return slug
+  const db = getDb()
+
+  // Check espn_leagues first (direct league aliases)
+  const leagueRows = db
+    .prepare('SELECT alias, league_slug FROM espn_leagues ORDER BY length(alias) DESC')
+    .all() as { alias: string; league_slug: string }[]
+
+  for (const row of leagueRows) {
+    if (q.includes(row.alias)) {
+      debugLog(`[espn] detectLeague: "${row.alias}" → ${row.league_slug}`)
+      return row.league_slug
     }
   }
-  for (const [team, slug] of Object.entries(TEAM_LEAGUE_MAP)) {
-    if (q.includes(team)) {
-      debugLog(`[espn] detectLeague via team: "${team}" → ${slug}`)
-      return slug
+
+  // Fallback: check espn_teams (infer league from team mention)
+  const teamRows = db
+    .prepare('SELECT alias, league_slug FROM espn_teams ORDER BY length(alias) DESC')
+    .all() as { alias: string; league_slug: string }[]
+
+  for (const row of teamRows) {
+    if (q.includes(row.alias)) {
+      debugLog(`[espn] detectLeague via team: "${row.alias}" → ${row.league_slug}`)
+      return row.league_slug
     }
   }
+
   debugLog(`[espn] detectLeague: no match for query "${q}"`)
   return null
 }
 
 export function detectTeam(query: string): { name: string; id?: string; leagueSlug: string } | null {
   const q = query.toLowerCase()
-  for (const [teamName, leagueSlug] of Object.entries(TEAM_LEAGUE_MAP)) {
-    if (q.includes(teamName)) {
-      const id = TEAM_ID_MAP[teamName]
-      debugLog(`[espn] detectTeam: "${teamName}" in ${leagueSlug} (id: ${id ?? 'unknown'})`)
-      return { name: teamName, id, leagueSlug }
+  const db = getDb()
+
+  const rows = db
+    .prepare('SELECT alias, canonical, league_slug, espn_id FROM espn_teams ORDER BY length(alias) DESC')
+    .all() as { alias: string; canonical: string; league_slug: string; espn_id: string | null }[]
+
+  for (const row of rows) {
+    if (q.includes(row.alias)) {
+      debugLog(`[espn] detectTeam: "${row.alias}" → ${row.canonical} in ${row.league_slug} (id: ${row.espn_id ?? 'unknown'})`)
+      return {
+        name: row.canonical,
+        id: row.espn_id ?? undefined,
+        leagueSlug: row.league_slug,
+      }
     }
   }
+
   debugLog(`[espn] detectTeam: no team match for query "${q}"`)
   return null
 }
 
 export function getSportForLeague(leagueSlug: string): string {
-  return LEAGUE_SPORT_MAP[leagueSlug] ?? 'soccer'
+  const db = getDb()
+  const row = db
+    .prepare('SELECT sport FROM espn_leagues WHERE league_slug = ? LIMIT 1')
+    .get(leagueSlug) as { sport: string } | undefined
+  return row?.sport ?? 'soccer'
 }
 
 // ---------------------------------------------------------------------------

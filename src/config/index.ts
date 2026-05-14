@@ -7,6 +7,7 @@ const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
 
 export const DEFAULT_MODEL = 'qwen2.5-coder:7b'
 export const ROUTER_MODEL = 'qwen2.5:3b'
+export const DEFAULT_OLLAMA_URL = 'http://localhost:11434'
 
 export const AVAILABLE_COLORS = [
   'cyan',
@@ -36,6 +37,8 @@ export interface NullConfig {
   openWeatherApiKey?: string
   cachedLocation?: CachedLocation
   model?: string
+  routerModel?: string
+  ollamaUrl?: string
 }
 
 const DEFAULT_CONFIG: NullConfig = {
@@ -56,6 +59,8 @@ export function loadConfig(): NullConfig {
       openWeatherApiKey: parsed.openWeatherApiKey,
       cachedLocation: parsed.cachedLocation,
       model: parsed.model,
+      routerModel: parsed.routerModel,
+      ollamaUrl: parsed.ollamaUrl,
     }
   } catch {
     return { ...DEFAULT_CONFIG }
