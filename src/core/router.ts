@@ -33,6 +33,15 @@ interface Signal {
  *   score < 5   → fallback to LLM
  */
 const SIGNALS: Signal[] = [
+  // ── NONE — greetings / personal questions (must beat everything else) ─────
+  { pattern: /^(hola|hi|hey|hello|buenas|qué tal|que tal|buenos días|buenas tardes|buenas noches)[\s!?.]*$/i, intent: 'none', weight: 20, description: 'pure greeting' },
+  { pattern: /\b(hola|hi|hey|hello)\b/i, intent: 'none', weight: 6, description: 'greeting keyword' },
+  { pattern: /\b(c[oó]mo\s+(est[aá]s?|andas?|te\s+va|te\s+encuentras?))\b/i, intent: 'none', weight: 12, description: 'how are you' },
+  { pattern: /\b(qui[eé]n\s+eres|who\s+are\s+you|c[oó]mo\s+te\s+llamas|what('s|\s+is)\s+your\s+name)\b/i, intent: 'none', weight: 20, description: 'identity question' },
+  { pattern: /\b(c[oó]mo\s+me\s+llamo|cu[aá]l\s+es\s+mi\s+nombre|sabes\s+mi\s+nombre|what('s|\s+is)\s+my\s+name)\b/i, intent: 'none', weight: 20, description: 'user name question' },
+  { pattern: /\b(eres\s+(una?\s+)?(ia|ai|inteligencia|bot|asistente|assistant))\b/i, intent: 'none', weight: 14, description: 'are you an AI' },
+  { pattern: /\b(gracias|thanks|thank\s+you|de\s+nada|you'?re\s+welcome)\b/i, intent: 'none', weight: 10, description: 'thanks/acknowledgement' },
+  { pattern: /\b(joke|chiste|broma|riddle|acertijo|adivinanza)\b/i, intent: 'none', weight: 10, description: 'joke/riddle' },
   // ── NONE — programming / technical (very high weight to block search) ──────
   { pattern: /\b(function|class|clase|array|loop|recursion|recursiva|algoritmo|algorithm)\b/i, intent: 'none', weight: 12, description: 'programming keyword' },
   { pattern: /\b(hola mundo|hello world)\b/i, intent: 'none', weight: 12, description: 'hello world' },
@@ -218,11 +227,13 @@ export async function routeQuery(query: string): Promise<RouterResult> {
   debugLog(`[router] CLLM result: ${JSON.stringify(cllm)}`)
 
   const cllmDecision = mapCLLMToDecision(cllm)
+  // Only override none→webSearch when CLLM is confident it's news/current-events.
+  // For conversation/factual/ambiguous queries, keep none — ReAct will search if needed.
   const finalDecision: RoutingDecision =
-    cllmDecision === 'none' && cllm.confidence < 0.7 ? 'webSearch' : cllmDecision
+    cllmDecision === 'webSearch' && cllm.confidence < 0.6 ? 'none' : cllmDecision
 
   if (finalDecision !== cllmDecision) {
-    debugLog(`[router] CLLM said none low-confidence → webSearch`)
+    debugLog(`[router] CLLM low-confidence webSearch → none (confidence: ${cllm.confidence})`)
   }
   debugLog(`[router] CLLM mapped decision: ${finalDecision} (confidence: ${cllm.confidence})`)
   return { decision: finalDecision, confidence: cllm.confidence, source: 'llm', cllm }
