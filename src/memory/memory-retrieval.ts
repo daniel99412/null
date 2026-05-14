@@ -115,7 +115,7 @@ export function buildMemoryContext(
     groups.get(label)!.push(m.value)
   }
 
-  const lines = ['[User context]']
+  const lines = ['[Known facts about the user you are talking to. Use this to answer personal questions about them, NOT about yourself.]']
   for (const [label, values] of groups) {
     lines.push(`- ${label}: ${values.join(', ')}`)
   }
