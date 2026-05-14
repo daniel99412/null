@@ -14,7 +14,7 @@
 - **LLM Runtime:** Ollama (local)
 - **Database:** SQLite (for memory/conversations)
 - **TUI:** Ink (React-based, planned)
-- **Package Manager:** npm
+- **Package Manager:** pnpm
 
 ---
 
@@ -35,12 +35,12 @@ src/
 
 | Action | Command | Notes |
 |--------|---------|-------|
-| Development | `npm run dev` | Uses tsx for hot reload |
-| Build | `npm run build` | Compiles to `dist/` |
-| Start | `npm run start` | Runs compiled JS |
-| Commit | `npm run commit` | Interactive commitizen |
+| Development | `pnpm dev` | Uses tsx for hot reload |
+| Build | `pnpm build` | Compiles to `dist/` |
+| Start | `pnpm start` | Runs compiled JS |
+| Commit | `pnpm commit` | Interactive commitizen |
 | Lint | (not configured) | Run before PRs |
-| Typecheck | `npx tsc --noEmit` | Verify types |
+| Typecheck | `pnpm tsc --noEmit` | Verify types |
 
 ---
 
@@ -137,7 +137,7 @@ When adding new tools:
 ## Git Workflow
 
 - Commit messages follow conventional commits (`feat:`, `fix:`, `docs:`, etc.)
-- Use `npm run commit` for interactive commits
+- Use `pnpm commit` for interactive commits
 - Husky pre-commit hooks enabled
 
 ---
@@ -163,7 +163,7 @@ When working on Null:
 
 After any code change:
 ```bash
-npm run build && npx tsc --noEmit
+pnpm build && pnpm tsc --noEmit
 ```
 
 ---

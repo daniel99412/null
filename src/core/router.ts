@@ -1,28 +1,8 @@
 import { normalizeQuery } from '../utils/normalize.js'
-import { getRouterClient } from './llm-client.js'
 import { debugLog } from '../utils/debug.js'
 import { getSportsAliases } from '../memory/memory-store.js'
-
-const ROUTER_SYSTEM_PROMPT = `You are a strict tool router.
-Your job is to classify the user query into exactly one of three options.
-
-Available tools:
-- webSearch: use ONLY when the query requires real-time data (prices, scores, current events, recent news) or information about events that may have happened recently.
-- getDateTime: use ONLY when the user explicitly asks for the current date or time.
-- getWeather: use ONLY when the user asks about current weather, temperature, forecast, rain, or climate conditions.
-- sportsQuery: use ONLY for sports-related queries that likely require up-to-date information, such as scores, standings, or upcoming matches.
-- none: use for general knowledge, programming, history, science, math, reasoning, jokes, and conversation.
-
-Rules:
-- Historical facts, science, math, geography → always "none"
-- Jokes, wordplay, riddles, conversational messages → always "none"  
-- Reasoning verifiable internally (anagrams, palindromes, math) → always "none"
-- Programming questions, code generation, tutorials → always "none"
-- Real-time or recent events (news, prices, scores, standings) → "webSearch" or "sportsQuery"
-- Only use "webSearch" if you are confident the information changes frequently or requires current data
-
-Respond ONLY with valid JSON. No text before or after.
-{ "tool": "webSearch" | "getDateTime" | "getWeather" | "none" | "sportsQuery" , "confidence": number }`.trim()
+import { classifyIntent } from './intent-classifier.js'
+import type { CLLMResult } from './intent-classifier.js'
 
 export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'savePreference' | 'none'
 
@@ -30,6 +10,7 @@ export interface RouterResult {
   decision: RoutingDecision
   confidence: number
   source: 'heuristic' | 'llm'
+  cllm?: CLLMResult
 }
 
 // ─── Scoring system ───────────────────────────────────────────────────────────
@@ -205,19 +186,6 @@ function topDecision(scores: Record<RoutingDecision, number>): {
   return { decision: best, confidence, scores }
 }
 
-// ─── LLM fallback ─────────────────────────────────────────────────────────────
-
-async function chat(messages: { role: string; content: string }[], systemPrompt: string): Promise<string> {
-  const client = getRouterClient()
-  return client.complete([
-    { role: 'system', content: systemPrompt },
-    ...messages.map((m) => ({
-      role: m.role as 'system' | 'user' | 'assistant',
-      content: m.content,
-    })),
-  ])
-}
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function routeQuery(query: string): Promise<RouterResult> {
@@ -244,27 +212,48 @@ export async function routeQuery(query: string): Promise<RouterResult> {
     return { decision, confidence, source: 'heuristic' }
   }
 
-  // Low-confidence score: fall back to LLM
-  debugLog(`[router] low confidence — falling back to LLM router`)
-  try {
-    const llmResponse = await chat(
-      [{ role: 'user', content: normalizedQuery }],
-      ROUTER_SYSTEM_PROMPT,
-    )
-    debugLog(`[router] LLM raw response: ${llmResponse.trim()}`)
-    const parsed = JSON.parse(llmResponse) as { tool: RoutingDecision; confidence: number }
-    if (['webSearch', 'getDateTime', 'getWeather', 'sportsQuery', 'savePreference', 'none'].includes(parsed.tool)) {
-      if (parsed.tool === 'none' && parsed.confidence < 0.7) {
-        debugLog(`[router] LLM said none low-confidence → webSearch`)
-        return { decision: 'webSearch', confidence: parsed.confidence, source: 'llm' }
-      }
-      debugLog(`[router] LLM result: ${parsed.tool} (confidence: ${parsed.confidence})`)
-      return { decision: parsed.tool, confidence: parsed.confidence, source: 'llm' }
-    }
-    debugLog(`[router] LLM returned unknown tool — defaulting to webSearch`)
-    return { decision: 'webSearch', confidence: 0.5, source: 'llm' }
-  } catch (err) {
-    debugLog(`[router] LLM parse failed: ${err instanceof Error ? err.message : String(err)} — defaulting to webSearch`)
-    return { decision: 'webSearch', confidence: 0, source: 'llm' }
+  // Low-confidence score: fall back to CLLM (intent-classifier)
+  debugLog(`[router] low confidence — falling back to CLLM`)
+  const cllm = await classifyIntent(normalizedQuery)
+  debugLog(`[router] CLLM result: ${JSON.stringify(cllm)}`)
+
+  const cllmDecision = mapCLLMToDecision(cllm)
+  const finalDecision: RoutingDecision =
+    cllmDecision === 'none' && cllm.confidence < 0.7 ? 'webSearch' : cllmDecision
+
+  if (finalDecision !== cllmDecision) {
+    debugLog(`[router] CLLM said none low-confidence → webSearch`)
   }
+  debugLog(`[router] CLLM mapped decision: ${finalDecision} (confidence: ${cllm.confidence})`)
+  return { decision: finalDecision, confidence: cllm.confidence, source: 'llm', cllm }
+}
+
+// ─── CLLM → RoutingDecision mapper ────────────────────────────────────────────
+
+function mapCLLMToDecision(cllm: CLLMResult): RoutingDecision {
+  // Use the first (primary) intent to determine routing
+  const primary = cllm.intents[0]
+  if (!primary) return 'webSearch'
+
+  const { category, intent } = primary
+
+  if (category === 'sports') {
+    // Scores/standings → ESPN; news/transfers/ownership → webSearch
+    if (intent === 'scores' || intent === 'standings') return 'sportsQuery'
+    return 'webSearch'
+  }
+
+  if (category === 'general_news') {
+    if (intent === 'factual' || intent === 'conversation') return 'none'
+    return 'webSearch'
+  }
+
+  if (category === 'science') {
+    // Factual science/math/history/programming → no search needed
+    if (intent === 'factual' || intent === 'conversation') return 'none'
+    // "news" about science/tech → search
+    return 'webSearch'
+  }
+
+  return 'webSearch'
 }
