@@ -623,9 +623,16 @@ export async function processQueryWithReAct(
   debugLog(`ReAct history length: ${history.length} messages`)
   history.forEach((m, i) => debugLog(`  [${i}] ${m.role}: ${m.content.slice(0, 60)}`))
 
+  // Inject memory context into system prompt if available
+  const memCtx = buildGeneralMemoryContext(query)
+  const systemPrompt = memCtx
+    ? `${REACT_SYSTEM_PROMPT}\n\n${memCtx}`
+    : REACT_SYSTEM_PROMPT
+  if (memCtx) debugLog(`[agent] injected memory context:\n${memCtx}`)
+
   // Build message list: system + prior history + current user query
   const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-    { role: 'system', content: REACT_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     ...history.map((m) => ({
       role: m.role as 'system' | 'user' | 'assistant',
       content: m.content,
