@@ -994,6 +994,15 @@ export interface SportsQueryOutput {
   scoreboard?: ESPNScoreboard
 }
 
+/**
+ * Returns true when the query is primarily asking for team/league news
+ * (headlines, transfers, injuries) rather than scores or standings.
+ */
+export function detectNewsIntent(query: string): boolean {
+  const q = query.toLowerCase()
+  return /noticias?|news|novedades?|transfer(encias?)?|fichajes?|lesion(es)?|lesionado|injured/.test(q)
+}
+
 export async function buildSportsContext(query: string): Promise<SportsQueryOutput | null> {
   const leagueSlug = detectLeague(query)
   if (!leagueSlug) {
@@ -1004,9 +1013,10 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   const focusTeam = detectTeam(query)
   const intent = detectDateIntent(query)
   const hasExplicit = hasExplicitDateRange(query)
+  const newsIntent = detectNewsIntent(query)
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
 
-  debugLog(`[espn] buildSportsContext: league=${leagueSlug} team=${focusTeam?.name ?? 'none'} intent=${intent} hasExplicit=${hasExplicit}`)
+  debugLog(`[espn] buildSportsContext: league=${leagueSlug} team=${focusTeam?.name ?? 'none'} intent=${intent} hasExplicit=${hasExplicit} newsIntent=${newsIntent}`)
 
   // --- Resolve scoreboard date range ---
   let scoreboardRange: DateRange
@@ -1107,22 +1117,51 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
     if (scoreboard.seasonPhase) tableParts.push(`_${scoreboard.seasonPhase}_`)
     tableParts.push('')
 
-    const live = scoreboard.games.filter((g) => g.status === 'in_progress')
-    const finals = scoreboard.games.filter((g) => g.status === 'final')
-    const scheduled = scoreboard.games.filter((g) => g.status === 'scheduled')
+    // When news intent with a focus team, only show that team's games in the table
+    const teamFilterFn = (focusTeam && newsIntent)
+      ? (g: ESPNGame) => {
+          const t = focusTeam.name.toLowerCase()
+          return g.home.team.toLowerCase().includes(t) || g.away.team.toLowerCase().includes(t)
+        }
+      : (_g: ESPNGame) => true
+
+    const live = scoreboard.games.filter((g) => g.status === 'in_progress' && teamFilterFn(g))
+    const finals = scoreboard.games.filter((g) => g.status === 'final' && teamFilterFn(g))
+    const scheduled = scoreboard.games.filter((g) => g.status === 'scheduled' && teamFilterFn(g))
 
     if (live.length > 0) { tableParts.push('EN VIVO'); tableParts.push(formatScoreboardTable(live, tz)); tableParts.push('') }
     if (finals.length > 0) { tableParts.push('Resultados'); tableParts.push(formatScoreboardTable(finals, tz)); tableParts.push('') }
     if (scheduled.length > 0) { tableParts.push('Proximos'); tableParts.push(formatScoreboardTable(scheduled, tz)); tableParts.push('') }
-    if (scoreboard.games.length === 0) tableParts.push('No se encontraron partidos para este periodo.')
+    if (live.length === 0 && finals.length === 0 && scheduled.length === 0) tableParts.push('No se encontraron partidos para este periodo.')
   }
   while (tableParts.length > 0 && tableParts[tableParts.length - 1] === '') tableParts.pop()
 
   // --- Build LLM context (includes notes, standings, news, summaries) ---
   const contextParts: string[] = []
 
+  // When news intent, put news first so LLM focuses on it
+  if (newsIntent && news && news.length > 0) {
+    const label = focusTeam
+      ? `${focusTeam.name}`
+      : `${scoreboard?.league ?? leagueSlug}`
+    contextParts.push(formatNewsContext(news, label))
+    contextParts.push('')
+  }
+
   if (scoreboard) {
-    contextParts.push(formatScoreboardContext(scoreboard, scoreboard.effectiveRange))
+    // For news intent with focus team, only include that team's game lines in context
+    if (focusTeam && newsIntent) {
+      const teamName = focusTeam.name.toLowerCase()
+      const filtered: ESPNScoreboard = {
+        ...scoreboard,
+        games: scoreboard.games.filter(
+          (g) => g.home.team.toLowerCase().includes(teamName) || g.away.team.toLowerCase().includes(teamName)
+        ),
+      }
+      contextParts.push(formatScoreboardContext(filtered, filtered.effectiveRange))
+    } else {
+      contextParts.push(formatScoreboardContext(scoreboard, scoreboard.effectiveRange))
+    }
   }
 
   if (standings) {
@@ -1135,7 +1174,8 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
     contextParts.push(formatSummaryContext(summary))
   }
 
-  if (news && news.length > 0) {
+  // Non-news intent: append news at the end
+  if (!newsIntent && news && news.length > 0) {
     const label = focusTeam
       ? `Noticias recientes — ${focusTeam.name}`
       : `Noticias recientes — ${scoreboard?.league ?? leagueSlug}`
