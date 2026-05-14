@@ -104,6 +104,14 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(juega|juegan|jugaron)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 8, description: 'plays/played' },
   { pattern: /(?:^|\s)(jugó|jugara|jugará)/i, intent: 'sportsQuery', weight: 8, description: 'played/will play' },
   { pattern: /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i, intent: 'sportsQuery', weight: 10, description: 'match of + time' },
+  // "noticias de mi equipo / club / deporte" → always sports, not webSearch
+  { pattern: /\bnoticias?\b.*\b(mi\s+equipo|mi\s+club|f[uú]tbol|futbol|deporte|liga|team|sport)\b/i, intent: 'sportsQuery', weight: 15, description: 'news about my team/sport' },
+  { pattern: /\b(mi\s+equipo|mi\s+club)\b.*\bnoticias?\b/i, intent: 'sportsQuery', weight: 15, description: 'my team news' },
+  // "cómo va / cómo está mi equipo"
+  { pattern: /\b(c[oó]mo\s+(va|est[aá]|le\s+fue|qued[oó]))\b.*\bmi\s+(equipo|club)\b/i, intent: 'sportsQuery', weight: 12, description: 'how is my team doing' },
+  { pattern: /\bmi\s+(equipo|club)\b.*\b(c[oó]mo\s+(va|est[aá]|le\s+fue|qued[oó]))\b/i, intent: 'sportsQuery', weight: 12, description: 'my team how is it doing' },
+  // "qué pasó con / qué hay de mi equipo"
+  { pattern: /\b(qu[eé]\s+(pas[oó]|hay|fue|hizo|dijo))\b.*\bmi\s+(equipo|club)\b/i, intent: 'sportsQuery', weight: 12, description: 'what happened with my team' },
 
   // ── SAVEPREFERENCE — user stating personal sports preference ──────────────
   { pattern: /\bmi equipo(s)? (favorito|fav|preferido)(s)? (es|son|de f[uú]tbol (es|son))\b/i, intent: 'savePreference', weight: 20, description: 'my favorite team' },
