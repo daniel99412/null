@@ -247,6 +247,10 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         updateSessionTitle(session.id, title)
       }
 
+      // Capture current messages BEFORE updating state, so history is always correct
+      // even if React batches the setMessages updater.
+      const currentMessages = messagesRef.current
+
       updateMessages((m) => [
         ...m,
         { role: 'user', content: txt },
@@ -260,8 +264,11 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
       const sendToLLM = async (): Promise<void> => {
         // Build conversation history from all previous turns.
-        const history: { role: string; content: string }[] = messagesRef.current
-          .slice(0, -2) // remove current user msg + empty assistant placeholder
+        // Use currentMessages (captured before state update) to avoid React batching issues.
+        if (process.env['NULL_DEBUG']) {
+          console.error(`[null-debug] currentMessages length: ${currentMessages.length}`)
+        }
+        const history: { role: string; content: string }[] = currentMessages
           .filter((m) => {
             if (m.role === 'assistant' && !m.content.trim()) return false
             if (m.role === 'recall' && !m.content.trim()) return false
@@ -276,6 +283,10 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             }
             return { role: m.role, content: m.content }
           })
+        if (process.env['NULL_DEBUG']) {
+          console.error(`[null-debug] history length after filter: ${history.length}`)
+          history.forEach((m, i) => console.error(`  [${i}] ${m.role}: ${String(m.content).slice(0, 60)}`))
+        }
 
         const isExplicitSearch = /^\/search\s+/i.test(txt)
 

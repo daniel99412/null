@@ -566,6 +566,9 @@ export async function processQueryWithReAct(
   const lang = detectQueryLanguage(query)
   const langInstruction = `IMPORTANT: Respond in ${lang}. The user wrote in ${lang} — always reply in ${lang} regardless of the language of the source material.`
 
+  debugLog(`ReAct history length: ${history.length} messages`)
+  history.forEach((m, i) => debugLog(`  [${i}] ${m.role}: ${m.content.slice(0, 60)}`))
+
   // Build message list: system + prior history + current user query
   const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
     { role: 'system', content: REACT_SYSTEM_PROMPT },
