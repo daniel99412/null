@@ -1,10 +1,28 @@
 /**
- * ESPN internal API client for sports scores and schedules.
- * No API key required — uses ESPN's public internal endpoints.
+ * ESPN API service — multi-endpoint sports data fetcher.
+ *
+ * Supports: scoreboard, team news, league news, standings, game summary.
+ * All public functions return plain data objects suitable for LLM context.
+ * Cache is handled in espn-cache.ts and integrated in buildSportsContext.
  */
 
+import {
+  buildCacheKey,
+  buildNewsCacheKey,
+  buildStandingsCacheKey,
+  buildSummaryCacheKey,
+  getCachedScoreboard,
+  setCachedScoreboard,
+  getCachedNews,
+  setCachedNews,
+  getCachedStandings,
+  setCachedStandings,
+  getCachedSummary,
+  setCachedSummary,
+} from '../memory/espn-cache.js'
+
 // ---------------------------------------------------------------------------
-// Types
+// Types — public
 // ---------------------------------------------------------------------------
 
 export interface ESPNCompetitor {
@@ -22,22 +40,94 @@ export interface ESPNGame {
   name: string
   date: string          // ISO 8601 UTC
   status: GameStatus
-  statusDetail: string  // e.g. "FT", "HT", "2nd Half 34'", "Sat, April 19 at 9:00 PM EDT"
+  statusDetail: string  // e.g. "FT", "HT", "2nd Half 34'"
   home: ESPNCompetitor
   away: ESPNCompetitor
   venue?: string
+  /** Tournament phase for this specific game (e.g. "Cuartos de Final", "Semifinales") */
+  phase?: string
+  /** Extra competition note (e.g. "1st Leg", "2nd Leg - Cruz Azul advance 5-3 on aggregate") */
+  note?: string
 }
 
 export interface ESPNScoreboard {
   league: string
   leagueSlug: string
   season?: string
+  /** Current phase/stage of the tournament from league-level season type */
+  seasonPhase?: string
   games: ESPNGame[]
-  effectiveRange: DateRange  // actual date range used (may differ from requested if fallback triggered)
+  effectiveRange: DateRange
+}
+
+export interface ESPNNewsArticle {
+  headline: string
+  description?: string
+  published: string   // ISO 8601
+  categories: string[]
+  link?: string
+}
+
+export interface ESPNStandingsEntry {
+  team: string
+  abbreviation: string
+  wins: number
+  losses: number
+  ties: number
+  points: number
+  gamesPlayed: number
+  rank?: number
+  note?: string       // e.g. "Clinched Playoffs", "Relegated"
+}
+
+export interface ESPNStandings {
+  league: string
+  season?: string
+  groups: {
+    name: string
+    entries: ESPNStandingsEntry[]
+  }[]
+}
+
+export interface ESPNGameSummary {
+  gameId: string
+  home: string
+  away: string
+  homeScore: string
+  awayScore: string
+  status: string
+  keyEvents: { minute: string; text: string }[]
+  topScorers: { name: string; team: string; stat: string }[]
+}
+
+/**
+ * Unified context object returned by buildSportsContext().
+ * Contains all fetched data for a query; caller uses it to build
+ * the LLM context string and the display table.
+ */
+export interface ESPNSportsContext {
+  /** Human-readable league name */
+  league: string
+  leagueSlug: string
+  /** Scoreboard with games for the relevant period */
+  scoreboard?: ESPNScoreboard
+  /** League or team news articles */
+  news?: ESPNNewsArticle[]
+  /** League standings table */
+  standings?: ESPNStandings
+  /** Detailed summary for specific recent games */
+  gameSummaries?: ESPNGameSummary[]
+  /** If a specific team was asked about, its name */
+  focusTeam?: string
+}
+
+export interface DateRange {
+  from: Date
+  to: Date
 }
 
 // ---------------------------------------------------------------------------
-// League map: natural language → ESPN slug
+// League / team resolution maps
 // ---------------------------------------------------------------------------
 
 const LEAGUE_MAP: Record<string, string> = {
@@ -95,11 +185,60 @@ const LEAGUE_MAP: Record<string, string> = {
   'ucl': 'uefa.champions',
   'liga de campeones': 'uefa.champions',
   'champions league europea': 'uefa.champions',
+
+  // Copa Libertadores
+  'libertadores': 'conmebol.libertadores',
+  'copa libertadores': 'conmebol.libertadores',
+  'conmebol libertadores': 'conmebol.libertadores',
+
+  // Liga Argentina
+  'liga argentina': 'arg.1',
+  'argentina': 'arg.1',
+  'primera argentina': 'arg.1',
+
+  // NBA
+  'nba': 'nba',
+  'basketball': 'nba',
+  'basquetbol': 'nba',
+  'basquetball': 'nba',
+
+  // NFL
+  'nfl': 'nfl',
+  'football americano': 'nfl',
+  'futbol americano': 'nfl',
+
+  // MLB
+  'mlb': 'mlb',
+  'baseball': 'mlb',
+  'beisbol': 'mlb',
+  'béisbol': 'mlb',
+
+  // NHL
+  'nhl': 'nhl',
+  'hockey': 'nhl',
 }
 
-// Teams that implicitly map to a league (for "resultados del america")
+// Sport slug per league (for multi-sport support)
+const LEAGUE_SPORT_MAP: Record<string, string> = {
+  'mex.1': 'soccer',
+  'usa.1': 'soccer',
+  'eng.1': 'soccer',
+  'esp.1': 'soccer',
+  'ita.1': 'soccer',
+  'ger.1': 'soccer',
+  'fra.1': 'soccer',
+  'uefa.champions': 'soccer',
+  'conmebol.libertadores': 'soccer',
+  'arg.1': 'soccer',
+  'nba': 'basketball',
+  'nfl': 'football',
+  'mlb': 'baseball',
+  'nhl': 'hockey',
+}
+
+// Teams mapped to their league (for implicit team queries)
 const TEAM_LEAGUE_MAP: Record<string, string> = {
-  // Liga MX teams
+  // Liga MX
   'america': 'mex.1', 'águilas': 'mex.1', 'aguilas': 'mex.1',
   'chivas': 'mex.1', 'guadalajara': 'mex.1', 'rebaño': 'mex.1', 'rebano': 'mex.1',
   'cruz azul': 'mex.1', 'la maquina': 'mex.1', 'la máquina': 'mex.1',
@@ -110,23 +249,99 @@ const TEAM_LEAGUE_MAP: Record<string, string> = {
   'toluca': 'mex.1', 'diablos rojos': 'mex.1',
   'pachuca': 'mex.1', 'tuzos': 'mex.1',
   'santos': 'mex.1', 'santos laguna': 'mex.1', 'guerreros': 'mex.1',
-  'leon': 'mex.1', 'león': 'mex.1', 'esmeralda': 'mex.1',
+  'leon': 'mex.1', 'león': 'mex.1',
   'necaxa': 'mex.1', 'rayos': 'mex.1',
   'puebla': 'mex.1', 'camoteros': 'mex.1',
   'queretaro': 'mex.1', 'querétaro': 'mex.1', 'gallos': 'mex.1',
   'tijuana': 'mex.1', 'xolos': 'mex.1',
   'juarez': 'mex.1', 'juárez': 'mex.1', 'bravos': 'mex.1',
-  'mazatlan': 'mex.1', 'mazatlán': 'mex.1', 'cañoneros': 'mex.1', 'canoneros': 'mex.1',
+  'mazatlan': 'mex.1', 'mazatlán': 'mex.1',
   'san luis': 'mex.1', 'atletico san luis': 'mex.1', 'atlético san luis': 'mex.1',
+  // LaLiga
+  'barcelona': 'esp.1', 'real madrid': 'esp.1', 'atletico madrid': 'esp.1',
+  'atlético madrid': 'esp.1', 'sevilla': 'esp.1', 'valencia': 'esp.1',
+  'villarreal': 'esp.1', 'athletic club': 'esp.1', 'real sociedad': 'esp.1',
+  // Premier League
+  'manchester city': 'eng.1', 'man city': 'eng.1', 'arsenal': 'eng.1',
+  'liverpool': 'eng.1', 'chelsea': 'eng.1', 'manchester united': 'eng.1',
+  'man united': 'eng.1', 'tottenham': 'eng.1', 'spurs': 'eng.1',
+  'newcastle': 'eng.1', 'aston villa': 'eng.1',
+  // Serie A
+  'juventus': 'ita.1', 'inter': 'ita.1', 'milan': 'ita.1', 'napoli': 'ita.1',
+  'roma': 'ita.1', 'lazio': 'ita.1',
+  // Bundesliga
+  'bayern': 'ger.1', 'bayern munich': 'ger.1', 'dortmund': 'ger.1',
+  'borussia dortmund': 'ger.1', 'bayer leverkusen': 'ger.1',
+  // NBA
+  'lakers': 'nba', 'los angeles lakers': 'nba', 'celtics': 'nba',
+  'warriors': 'nba', 'bulls': 'nba', 'heat': 'nba', 'nets': 'nba',
+  'knicks': 'nba', 'san antonio spurs': 'nba', 'suns': 'nba',
+}
+
+// Team name → ESPN team ID (for news/roster endpoints)
+// These are the IDs returned by /teams endpoint
+const TEAM_ID_MAP: Record<string, string> = {
+  // Liga MX
+  'america': '227', 'águilas': '227', 'aguilas': '227',
+  'atlas': '216', 'zorros': '216',
+  'chivas': '219', 'guadalajara': '219',
+  'cruz azul': '218', 'la maquina': '218',
+  'pumas': '233', 'pumas unam': '233',
+  'tigres': '232', 'tigres uanl': '232',
+  'monterrey': '220', 'rayados': '220',
+  'toluca': '223', 'diablos rojos': '223',
+  'pachuca': '234', 'tuzos': '234',
+  'santos': '225', 'santos laguna': '225',
+  'leon': '228', 'león': '228',
+  'necaxa': '229', 'rayos': '229',
+  'puebla': '231', 'camoteros': '231',
+  'queretaro': '222', 'querétaro': '222',
+  'tijuana': '10125', 'xolos': '10125',
+  'juarez': '17851', 'juárez': '17851',
+  'mazatlan': '20702', 'mazatlán': '20702',
+  'san luis': '15720', 'atletico san luis': '15720',
+}
+
+// ---------------------------------------------------------------------------
+// Detection helpers
+// ---------------------------------------------------------------------------
+
+export function detectLeague(query: string): string | null {
+  const q = query.toLowerCase()
+  for (const [keyword, slug] of Object.entries(LEAGUE_MAP)) {
+    if (q.includes(keyword)) return slug
+  }
+  for (const [team, slug] of Object.entries(TEAM_LEAGUE_MAP)) {
+    if (q.includes(team)) return slug
+  }
+  return null
+}
+
+export function detectTeam(query: string): { name: string; id?: string; leagueSlug: string } | null {
+  const q = query.toLowerCase()
+  for (const [teamName, leagueSlug] of Object.entries(TEAM_LEAGUE_MAP)) {
+    if (q.includes(teamName)) {
+      const id = TEAM_ID_MAP[teamName]
+      return { name: teamName, id, leagueSlug }
+    }
+  }
+  return null
+}
+
+export function getSportForLeague(leagueSlug: string): string {
+  return LEAGUE_SPORT_MAP[leagueSlug] ?? 'soccer'
 }
 
 // ---------------------------------------------------------------------------
 // Date helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Format a Date to YYYYMMDD string (ESPN API format).
- */
+export interface ESPNDateIntent {
+  type: 'lastMatchday' | 'range'
+}
+
+export type DateIntent = 'lastMatchday' | 'range'
+
 function toESPNDate(date: Date): string {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -134,12 +349,9 @@ function toESPNDate(date: Date): string {
   return `${y}${m}${d}`
 }
 
-/**
- * Get Monday and Sunday of the current week (local time).
- */
-function currentWeekRange(): { from: Date; to: Date } {
+function currentWeekRange(): DateRange {
   const now = new Date()
-  const day = now.getDay() // 0=Sun, 1=Mon...
+  const day = now.getDay()
   const diffToMon = day === 0 ? -6 : 1 - day
   const monday = new Date(now)
   monday.setDate(now.getDate() + diffToMon)
@@ -150,10 +362,7 @@ function currentWeekRange(): { from: Date; to: Date } {
   return { from: monday, to: sunday }
 }
 
-/**
- * Get Monday and Sunday of the PREVIOUS week (local time).
- */
-function lastWeekRange(): { from: Date; to: Date } {
+function lastWeekRange(): DateRange {
   const { from } = currentWeekRange()
   const monday = new Date(from)
   monday.setDate(from.getDate() - 7)
@@ -162,33 +371,23 @@ function lastWeekRange(): { from: Date; to: Date } {
   return { from: monday, to: sunday }
 }
 
-/**
- * Get Saturday and Sunday of the PREVIOUS weekend (local time).
- * "Previous weekend" = the most recently completed Sat-Sun.
- * If today is Mon/Tue/Wed, last weekend = Sat-Sun 2-3 days ago.
- * If today is Thu/Fri, last weekend = same logic (still most recent past).
- */
-function lastWeekendRange(): { from: Date; to: Date } {
+function lastWeekendRange(): DateRange {
   const now = new Date()
-  const day = now.getDay() // 0=Sun,1=Mon,...,6=Sat
-  // Days since last Sunday
-  const daysSinceSun = day === 0 ? 7 : day  // if today is Sun, treat as 7 so we go to previous Sun
+  const day = now.getDay()
+  const daysSinceSun = day === 0 ? 7 : day
   const lastSunday = new Date(now)
   lastSunday.setDate(now.getDate() - daysSinceSun)
   lastSunday.setHours(23, 59, 59, 999)
   const lastFriday = new Date(lastSunday)
-  lastFriday.setDate(lastSunday.getDate() - 2)  // Fri = Sun - 2
+  lastFriday.setDate(lastSunday.getDate() - 2)
   lastFriday.setHours(0, 0, 0, 0)
   return { from: lastFriday, to: lastSunday }
 }
 
-/**
- * Get Friday–Sunday of the UPCOMING / current weekend.
- */
-function nextWeekendRange(): { from: Date; to: Date } {
+function nextWeekendRange(): DateRange {
   const now = new Date()
   const day = now.getDay()
-  const daysToFri = day <= 5 ? 5 - day : 5 - day + 7  // next Friday
+  const daysToFri = day <= 5 ? 5 - day : 5 - day + 7
   const friday = new Date(now)
   friday.setDate(now.getDate() + daysToFri)
   friday.setHours(0, 0, 0, 0)
@@ -198,10 +397,84 @@ function nextWeekendRange(): { from: Date; to: Date } {
   return { from: friday, to: sunday }
 }
 
+const EXPLICIT_DATE_PATTERNS = [
+  /semana pasada|last week|semana anterior/,
+  /fin de semana|weekend/,
+  /esta semana|this week|semana actual/,
+  /\bhoy\b|\btoday\b/,
+  /\bayer\b|\byesterday\b/,
+  /últimos|ultimos|recientes|recent|últimas|ultimas/,
+  /próximos|proximos|siguientes|upcoming/,
+  /jornada\s+\d+/,
+  /última jornada|ultima jornada|last matchday|jornada pasada|jornada anterior/,
+]
 
+export function detectDateIntent(query: string): DateIntent {
+  const q = query.toLowerCase()
+  if (/última jornada|ultima jornada|last matchday|jornada pasada|jornada anterior/.test(q)) {
+    return 'lastMatchday'
+  }
+  return 'range'
+}
+
+export function hasExplicitDateRange(query: string): boolean {
+  const q = query.toLowerCase()
+  return EXPLICIT_DATE_PATTERNS.some((p) => p.test(q))
+}
+
+export function detectDateRange(query: string): DateRange {
+  const q = query.toLowerCase()
+
+  if (/semana pasada|last week|semana anterior/.test(q)) return lastWeekRange()
+
+  if (/fin de semana pasado|last weekend|el fin de semana|fin de semana/.test(q)) {
+    if (/próximo|proximo|siguiente|next/.test(q)) return nextWeekendRange()
+    return lastWeekendRange()
+  }
+
+  if (/esta semana|this week|semana actual|semana corriente/.test(q)) return currentWeekRange()
+
+  if (/\bhoy\b|\btoday\b/.test(q)) {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const end = new Date(today)
+    end.setHours(23, 59, 59, 999)
+    return { from: today, to: end }
+  }
+
+  if (/\bayer\b|\byesterday\b/.test(q)) {
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    yesterday.setHours(0, 0, 0, 0)
+    const end = new Date(yesterday)
+    end.setHours(23, 59, 59, 999)
+    return { from: yesterday, to: end }
+  }
+
+  if (/últimos|ultimos|recientes|recent|últimas|ultimas/.test(q)) {
+    const to = new Date()
+    const from = new Date()
+    from.setDate(to.getDate() - 7)
+    from.setHours(0, 0, 0, 0)
+    return { from, to }
+  }
+
+  if (/próximos|proximos|siguientes|upcoming|next/.test(q)) {
+    const from = new Date()
+    const to = new Date()
+    to.setDate(from.getDate() + 7)
+    return { from, to }
+  }
+
+  return currentWeekRange()
+}
+
+// ---------------------------------------------------------------------------
+// Raw API type interfaces (internal)
+// ---------------------------------------------------------------------------
 
 interface ESPNScoreboardRaw {
-  leagues?: { name?: string; season?: { displayName?: string } }[]
+  leagues?: { name?: string; season?: { displayName?: string; type?: { name?: string } } }[]
   events?: ESPNEventRaw[]
 }
 
@@ -209,6 +482,7 @@ interface ESPNEventRaw {
   id?: string
   name?: string
   date?: string
+  season?: { slug?: string; type?: number }
   competitions?: ESPNCompetitionRaw[]
 }
 
@@ -216,6 +490,7 @@ interface ESPNCompetitionRaw {
   status?: { type?: { name?: string; detail?: string } }
   venue?: { fullName?: string }
   competitors?: ESPNCompetitorRaw[]
+  notes?: { text?: string }[]
 }
 
 interface ESPNCompetitorRaw {
@@ -225,12 +500,29 @@ interface ESPNCompetitorRaw {
   team?: { displayName?: string; abbreviation?: string }
 }
 
+// ---------------------------------------------------------------------------
+// Internal parse helpers
+// ---------------------------------------------------------------------------
+
 function parseStatus(raw: string | undefined): GameStatus {
   if (!raw) return 'scheduled'
   const r = raw.toUpperCase()
   if (r.includes('FINAL') || r.includes('FULL_TIME') || r.includes('FT')) return 'final'
   if (r.includes('PROGRESS') || r.includes('HALF') || r.includes('LIVE')) return 'in_progress'
   return 'scheduled'
+}
+
+function slugToPhaseLabel(slug: string | undefined): string | undefined {
+  if (!slug) return undefined
+  const s = slug.toLowerCase()
+  if (s.includes('final---') || s.endsWith('-final') || s.includes('---final')) return 'Final'
+  if (s.includes('semifinal')) return 'Semifinales'
+  if (s.includes('quarterfinal') || s.includes('quarter-final')) return 'Cuartos de Final'
+  if (s.includes('round-of-16') || s.includes('octavos')) return 'Octavos de Final'
+  if (s.includes('8th-seed') || s.includes('repechaje') || s.includes('play-in')) return 'Repechaje'
+  if (s.includes('playoff')) return 'Playoffs'
+  if (s.includes('regular')) return 'Temporada Regular'
+  return undefined
 }
 
 function parseCompetitor(raw: ESPNCompetitorRaw): ESPNCompetitor {
@@ -243,14 +535,17 @@ function parseCompetitor(raw: ESPNCompetitorRaw): ESPNCompetitor {
   }
 }
 
-async function fetchScoreboard(leagueSlug: string, dateParam: string): Promise<ESPNScoreboardRaw> {
-  const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/${leagueSlug}/scoreboard?dates=${dateParam}`
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NullCLI/1.0)' },
-  })
-  if (!res.ok) throw new Error(`ESPN API error: ${res.status} for ${url}`)
-  return await res.json() as ESPNScoreboardRaw
+const ESPN_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; NullCLI/1.0)' }
+
+async function espnFetch(url: string): Promise<unknown> {
+  const res = await fetch(url, { headers: ESPN_HEADERS })
+  if (!res.ok) throw new Error(`ESPN API ${res.status}: ${url}`)
+  return res.json()
 }
+
+// ---------------------------------------------------------------------------
+// Scoreboard
+// ---------------------------------------------------------------------------
 
 function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string, range: DateRange): ESPNScoreboard {
   const league = raw.leagues?.[0]
@@ -259,7 +554,6 @@ function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string, range: Date
   for (const event of raw.events ?? []) {
     const comp = event.competitions?.[0]
     if (!comp) continue
-
     const competitors = comp.competitors ?? []
     const home = competitors.find((c) => c.homeAway === 'home')
     const away = competitors.find((c) => c.homeAway === 'away')
@@ -274,6 +568,8 @@ function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string, range: Date
       home: parseCompetitor(home),
       away: parseCompetitor(away),
       venue: comp.venue?.fullName,
+      phase: slugToPhaseLabel(event.season?.slug),
+      note: comp.notes?.[0]?.text,
     })
   }
 
@@ -281,51 +577,36 @@ function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string, range: Date
     league: league?.name ?? leagueSlug,
     leagueSlug,
     season: league?.season?.displayName,
+    seasonPhase: league?.season?.type?.name,
     games,
     effectiveRange: range,
   }
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-export interface DateRange {
-  from: Date
-  to: Date
-}
-
-/**
- * Fetch scoreboard for a league and a required date range.
- * Always requires an explicit range — callers should use getLastMatchdayRange()
- * when no date is specified.
- */
 export async function getScoreboard(leagueSlug: string, range: DateRange): Promise<ESPNScoreboard> {
+  const sport = getSportForLeague(leagueSlug)
   const dateParam = `${toESPNDate(range.from)}-${toESPNDate(range.to)}`
-  const raw = await fetchScoreboard(leagueSlug, dateParam)
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/scoreboard?dates=${dateParam}`
+  const raw = await espnFetch(url) as ESPNScoreboardRaw
   return parseScoreboard(raw, leagueSlug, range)
 }
-/**
- * Fetch the last 21 days of games for a league and find the most recent
- * "matchday cluster" — a group of games played within a 4-day window.
- * Returns the date range of that cluster (the last jornada).
- * Falls back to lastWeekendRange() if no completed games are found.
- */
+
 export async function getLastMatchdayRange(leagueSlug: string): Promise<DateRange> {
   const to = new Date()
   const from = new Date()
   from.setDate(to.getDate() - 21)
   from.setHours(0, 0, 0, 0)
 
+  const sport = getSportForLeague(leagueSlug)
   const dateParam = `${toESPNDate(from)}-${toESPNDate(to)}`
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/scoreboard?dates=${dateParam}`
+
   try {
-    const raw = await fetchScoreboard(leagueSlug, dateParam)
+    const raw = await espnFetch(url) as ESPNScoreboardRaw
     const games = parseScoreboard(raw, leagueSlug, { from, to }).games
     const finals = games.filter((g) => g.status === 'final')
-
     if (finals.length === 0) return lastWeekendRange()
 
-    // Group by local date string, sorted descending
     const dateMap = new Map<string, Date>()
     for (const g of finals) {
       const d = new Date(g.date)
@@ -336,7 +617,6 @@ export async function getLastMatchdayRange(leagueSlug: string): Promise<DateRang
     const sortedDates = [...dateMap.keys()].sort().reverse()
     if (sortedDates.length === 0) return lastWeekendRange()
 
-    // Walk back from the most recent date and collect dates within a 4-day window
     const latestDate = new Date(sortedDates[0] + 'T00:00:00Z')
     const clusterDates = sortedDates.filter((ds) => {
       const diff = (latestDate.getTime() - new Date(ds + 'T00:00:00Z').getTime()) / 86400000
@@ -354,169 +634,380 @@ export async function getLastMatchdayRange(leagueSlug: string): Promise<DateRang
   }
 }
 
-/**
- * Returns the ESPN league slug or null if not detected.
- */
-export function detectLeague(query: string): string | null {
-  const q = query.toLowerCase()
+// ---------------------------------------------------------------------------
+// News
+// ---------------------------------------------------------------------------
 
-  // Direct league name match
-  for (const [keyword, slug] of Object.entries(LEAGUE_MAP)) {
-    if (q.includes(keyword)) return slug
-  }
-
-  // Implicit league via team name
-  for (const [team, slug] of Object.entries(TEAM_LEAGUE_MAP)) {
-    if (q.includes(team)) return slug
-  }
-
-  return null
+interface ESPNNewsRaw {
+  articles?: {
+    headline?: string
+    description?: string
+    published?: string
+    links?: { web?: { href?: string } }
+    categories?: { type?: string; description?: string }[]
+  }[]
 }
 
-const EXPLICIT_DATE_PATTERNS = [
-  /semana pasada|last week|semana anterior/,
-  /fin de semana|weekend/,
-  /esta semana|this week|semana actual/,
-  /\bhoy\b|\btoday\b/,
-  /\bayer\b|\byesterday\b/,
-  /últimos|ultimos|recientes|recent|últimas|ultimas/,
-  /próximos|proximos|siguientes|upcoming/,
-  /jornada\s+\d+/,
-  /última jornada|ultima jornada|last matchday|jornada pasada|jornada anterior/,
-]
-
-export type DateIntent = 'lastMatchday' | 'range'
-
-/**
- * Returns the date intent: 'lastMatchday' if user asked for última jornada,
- * 'range' for everything else (use detectDateRange + hasExplicitDateRange).
- */
-export function detectDateIntent(query: string): DateIntent {
-  const q = query.toLowerCase()
-  if (/última jornada|ultima jornada|last matchday|jornada pasada|jornada anterior/.test(q)) {
-    return 'lastMatchday'
-  }
-  return 'range'
+function parseNews(raw: ESPNNewsRaw): ESPNNewsArticle[] {
+  return (raw.articles ?? []).map((a) => ({
+    headline: a.headline ?? '',
+    description: a.description,
+    published: a.published ?? '',
+    categories: (a.categories ?? [])
+      .filter((c) => c.type && ['team', 'league', 'athlete'].includes(c.type))
+      .map((c) => c.description ?? '')
+      .filter(Boolean),
+    link: a.links?.web?.href,
+  }))
 }
 
 /**
- * Returns true if the query contains an explicit time reference.
- * Used to decide whether to pass range to getScoreboard or let it auto-detect.
+ * Fetch recent news for a league (e.g. Liga MX, EPL).
  */
-export function hasExplicitDateRange(query: string): boolean {
-  const q = query.toLowerCase()
-  return EXPLICIT_DATE_PATTERNS.some((p) => p.test(q))
+export async function getLeagueNews(leagueSlug: string, limit = 5): Promise<ESPNNewsArticle[]> {
+  const sport = getSportForLeague(leagueSlug)
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/news?limit=${limit}`
+  const raw = await espnFetch(url) as ESPNNewsRaw
+  return parseNews(raw)
 }
 
 /**
- * Detect the date range the user is asking about.
- * Returns a DateRange or defaults to current week.
+ * Fetch recent news for a specific team.
  */
-export function detectDateRange(query: string): DateRange {
-  const q = query.toLowerCase()
+export async function getTeamNews(leagueSlug: string, teamId: string, limit = 5): Promise<ESPNNewsArticle[]> {
+  const sport = getSportForLeague(leagueSlug)
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/teams/${teamId}/news?limit=${limit}`
+  const raw = await espnFetch(url) as ESPNNewsRaw
+  return parseNews(raw)
+}
 
-  // "semana pasada", "la semana pasada", "last week"
-  if (/semana pasada|last week|semana anterior/.test(q)) {
-    return lastWeekRange()
-  }
+// ---------------------------------------------------------------------------
+// Standings
+// ---------------------------------------------------------------------------
 
-  // "fin de semana pasado", "el fin de semana", "weekend" — most recent Sat-Sun
-  // Also catch bare "fin de semana" when asking for results (implied past)
-  if (/fin de semana pasado|last weekend|el fin de semana|fin de semana/.test(q)) {
-    // If query mentions "próximo" or "siguiente", return next weekend
-    if (/próximo|proximo|siguiente|next/.test(q)) {
-      return nextWeekendRange()
+interface ESPNStandingsRaw {
+  uid?: string
+  season?: { year?: number; displayName?: string }
+  name?: string
+  children?: {
+    name?: string
+    abbreviation?: string
+    standings?: {
+      entries?: {
+        team?: { id?: string; displayName?: string; abbreviation?: string }
+        note?: { description?: string }
+        stats?: { name?: string; displayValue?: string; value?: number }[]
+      }[]
     }
-    return lastWeekendRange()
+  }[]
+  // flat (no children) — some leagues return entries directly
+  standings?: {
+    entries?: {
+      team?: { displayName?: string; abbreviation?: string }
+      note?: { description?: string }
+      stats?: { name?: string; displayValue?: string; value?: number }[]
+    }[]
   }
-
-  // "esta semana", "this week", "semana actual"
-  if (/esta semana|this week|semana actual|semana corriente/.test(q)) {
-    return currentWeekRange()
-  }
-
-  // "hoy", "today" → just today
-  if (/\bhoy\b|\btoday\b/.test(q)) {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const end = new Date(today)
-    end.setHours(23, 59, 59, 999)
-    return { from: today, to: end }
-  }
-
-  // "ayer", "yesterday"
-  if (/\bayer\b|\byesterday\b/.test(q)) {
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    yesterday.setHours(0, 0, 0, 0)
-    const end = new Date(yesterday)
-    end.setHours(23, 59, 59, 999)
-    return { from: yesterday, to: end }
-  }
-
-  // "últimos resultados", "recientes" → last 7 days
-  if (/últimos|ultimos|recientes|recent|últimas|ultimas/.test(q)) {
-    const to = new Date()
-    const from = new Date()
-    from.setDate(to.getDate() - 7)
-    from.setHours(0, 0, 0, 0)
-    return { from, to }
-  }
-
-  // "próximos partidos", "siguientes", "upcoming" → next 7 days
-  if (/próximos|proximos|siguientes|upcoming|next/.test(q)) {
-    const from = new Date()
-    const to = new Date()
-    to.setDate(from.getDate() + 7)
-    return { from, to }
-  }
-
-  // Default: current week
-  return currentWeekRange()
 }
 
-// ---------------------------------------------------------------------------
-// Format helpers (build a context string for the LLM)
-// ---------------------------------------------------------------------------
-
-function formatGameLine(game: ESPNGame, localTZ?: string): string {
-  const date = new Date(game.date)
-  const localDate = date.toLocaleDateString('es-MX', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    timeZone: localTZ,
+function parseStandingsEntries(
+  entries: NonNullable<NonNullable<ESPNStandingsRaw['children']>[0]['standings']>['entries'],
+): ESPNStandingsEntry[] {
+  return (entries ?? []).map((e) => {
+    const stat = (name: string) => {
+      const s = (e.stats ?? []).find((s) => s.name === name)
+      return s?.value ?? 0
+    }
+    return {
+      team: e.team?.displayName ?? 'Unknown',
+      abbreviation: e.team?.abbreviation ?? '???',
+      wins: stat('wins'),
+      losses: stat('losses'),
+      ties: stat('ties'),
+      points: stat('points'),
+      gamesPlayed: stat('gamesPlayed'),
+      rank: stat('rank') || undefined,
+      note: e.note?.description,
+    }
   })
-  const localTime = date.toLocaleTimeString('es-MX', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: localTZ,
-    hour12: true,
-  })
-
-  if (game.status === 'final') {
-    const winner = game.home.winner ? `**${game.home.team}**` : game.home.team
-    const loser = game.away.winner ? `**${game.away.team}**` : game.away.team
-    const homeDisplay = game.home.winner ? `**${game.home.team}**` : game.home.team
-    const awayDisplay = game.away.winner ? `**${game.away.team}**` : game.away.team
-    void winner; void loser
-    return `• ${homeDisplay} ${game.home.score} - ${game.away.score} ${awayDisplay} (Final) — ${localDate}`
-  }
-
-  if (game.status === 'in_progress') {
-    return `• ${game.home.team} ${game.home.score} - ${game.away.score} ${game.away.team} [${game.statusDetail}] — EN VIVO`
-  }
-
-  // scheduled
-  return `• ${game.home.team} vs ${game.away.team} — ${localDate} ${localTime}`
 }
 
 /**
- * Build a formatted context string from a scoreboard to inject into LLM.
+ * Fetch league standings. Soccer uses /apis/v2/ (site/v2 returns empty).
  */
+export async function getStandings(leagueSlug: string): Promise<ESPNStandings> {
+  const sport = getSportForLeague(leagueSlug)
+  // Soccer standings require /apis/v2/ not /apis/site/v2/
+  const isSoccer = sport === 'soccer'
+  const baseUrl = isSoccer
+    ? `https://site.api.espn.com/apis/v2/sports/${sport}/${leagueSlug}/standings`
+    : `https://site.api.espn.com/apis/v2/sports/${sport}/${leagueSlug}/standings`
+  const raw = await espnFetch(baseUrl) as ESPNStandingsRaw
+
+  const leagueName = raw.name ?? leagueSlug
+  const season = raw.season?.displayName
+
+  // Multi-conference format
+  if (raw.children && raw.children.length > 0) {
+    const groups = raw.children.map((child) => ({
+      name: child.name ?? '',
+      entries: parseStandingsEntries(child.standings?.entries),
+    }))
+    return { league: leagueName, season, groups }
+  }
+
+  // Flat format (single group)
+  if (raw.standings?.entries) {
+    return {
+      league: leagueName,
+      season,
+      groups: [{ name: '', entries: parseStandingsEntries(raw.standings.entries) }],
+    }
+  }
+
+  return { league: leagueName, season, groups: [] }
+}
+
+// ---------------------------------------------------------------------------
+// Game summary
+// ---------------------------------------------------------------------------
+
+interface ESPNSummaryRaw {
+  header?: {
+    competitions?: {
+      competitors?: { team?: { displayName?: string }; score?: string }[]
+      status?: { type?: { description?: string } }
+    }[]
+  }
+  keyEvents?: {
+    type?: { text?: string }
+    text?: string
+    clock?: { displayValue?: string }
+  }[]
+  leaders?: {
+    team?: { displayName?: string }
+    leaders?: {
+      displayName?: string
+      leaders?: { displayValue?: string; athlete?: { displayName?: string } }[]
+    }[]
+  }[]
+}
+
+export async function getGameSummary(leagueSlug: string, gameId: string): Promise<ESPNGameSummary | null> {
+  const sport = getSportForLeague(leagueSlug)
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/summary?event=${gameId}`
+  try {
+    const raw = await espnFetch(url) as ESPNSummaryRaw
+    const comp = raw.header?.competitions?.[0]
+    const competitors = comp?.competitors ?? []
+    const home = competitors.find((_, i) => i === 0) // ESPN puts home first in summary
+    const away = competitors.find((_, i) => i === 1)
+
+    const keyEvents = (raw.keyEvents ?? []).slice(0, 10).map((e) => ({
+      minute: e.clock?.displayValue ?? '',
+      text: e.text ?? '',
+    }))
+
+    const topScorers: ESPNGameSummary['topScorers'] = []
+    for (const teamLeader of raw.leaders ?? []) {
+      const teamName = teamLeader.team?.displayName ?? ''
+      for (const cat of teamLeader.leaders ?? []) {
+        const top = cat.leaders?.[0]
+        if (top?.athlete?.displayName) {
+          topScorers.push({
+            name: top.athlete.displayName,
+            team: teamName,
+            stat: `${cat.displayName}: ${top.displayValue}`,
+          })
+        }
+      }
+    }
+
+    return {
+      gameId,
+      home: home?.team?.displayName ?? '',
+      away: away?.team?.displayName ?? '',
+      homeScore: home?.score ?? '-',
+      awayScore: away?.score ?? '-',
+      status: comp?.status?.type?.description ?? '',
+      keyEvents,
+      topScorers: topScorers.slice(0, 6),
+    }
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sports commentary prompt builder — ordered by date, recent vs prior
+// ---------------------------------------------------------------------------
+
+export interface SportsCommentaryContext {
+  /** Short system block for the LLM: recent games first, prior context below */
+  systemPrompt: string
+  /** The user-facing instruction injected as the final user message */
+  userInstruction: string
+}
+
+/**
+ * Build a structured, date-ordered commentary context from scoreboard data.
+ * Separates "most recent" games (last 3 days) from "prior context" games.
+ * This keeps the model focused on what actually just happened.
+ */
+export function buildSportsCommentaryPrompt(
+  scoreboard: ESPNScoreboard,
+  userQuery: string,
+  tz: string,
+  preferencesContext?: string,
+): SportsCommentaryContext {
+  const now = new Date()
+  const recentCutoff = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+
+  const finals = scoreboard.games.filter((g) => g.status === 'final')
+  const scheduled = scoreboard.games.filter((g) => g.status === 'scheduled')
+
+  // Sort finals by date descending
+  const sortedFinals = [...finals].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  )
+
+  const recentFinals = sortedFinals.filter((g) => new Date(g.date) >= recentCutoff)
+  const priorFinals = sortedFinals.filter((g) => new Date(g.date) < recentCutoff)
+
+  const fmtGame = (g: ESPNGame): string => {
+    const date = new Date(g.date).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
+    const phase = g.phase ? ` [${g.phase}]` : ''
+    const note = g.note ? ` — ${g.note}` : ''
+    const winner = g.home.winner ? g.home.team : g.away.winner ? g.away.team : null
+    const result = winner
+      ? `${g.home.team} ${g.home.score}-${g.away.score} ${g.away.team} (ganó ${winner})`
+      : `${g.home.team} ${g.home.score}-${g.away.score} ${g.away.team}`
+    return `• ${result}${phase}${note} — ${date}`
+  }
+
+  const fmtScheduled = (g: ESPNGame): string => {
+    const date = new Date(g.date)
+    const dateStr = date.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
+    const timeStr = date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz })
+    const phase = g.phase ? ` [${g.phase}]` : ''
+    return `• ${g.home.team} vs ${g.away.team}${phase} — ${dateStr} ${timeStr}`
+  }
+
+  const parts: string[] = [
+    `Liga: ${scoreboard.league}${scoreboard.season ? ` — ${scoreboard.season}` : ''}`,
+    `Fase actual: ${scoreboard.seasonPhase ?? 'desconocida'}`,
+    '',
+  ]
+
+  if (preferencesContext) {
+    parts.push(preferencesContext)
+    parts.push('')
+  }
+
+  if (recentFinals.length > 0) {
+    parts.push('=== RESULTADOS MÁS RECIENTES (última jornada) ===')
+    recentFinals.forEach((g) => parts.push(fmtGame(g)))
+    parts.push('')
+  }
+
+  if (priorFinals.length > 0) {
+    parts.push('=== CONTEXTO — resultados anteriores ===')
+    priorFinals.forEach((g) => parts.push(fmtGame(g)))
+    parts.push('')
+  }
+
+  if (scheduled.length > 0) {
+    parts.push('=== PRÓXIMOS PARTIDOS ===')
+    scheduled.forEach((g) => parts.push(fmtScheduled(g)))
+    parts.push('')
+  }
+
+  const hasRecent = recentFinals.length > 0
+  const hasNext = scheduled.length > 0
+
+  const userInstruction = `Pregunta del usuario: "${userQuery}"
+
+Escribe 2-4 líneas de comentario deportivo. Idioma: español.
+
+REGLAS — síguelas al pie de la letra:
+1. Enfócate en los RESULTADOS MÁS RECIENTES (sección de arriba)
+2. Puedes mencionar el contexto anterior brevemente (quién avanzó de cuartos, etc.)
+3. Si hay próximos partidos, menciona cuál es el siguiente
+4. NO inventes nada que no esté en los datos de arriba
+5. NO menciones campeones, relegados ni títulos si no aparecen explícitamente
+6. NO repitas los marcadores exactos (ya están en la tabla)
+7. Tono: analista deportivo casual, directo, en español
+${!hasRecent ? '8. No hay resultados recientes — describe solo los próximos partidos o di "Jornada en curso."' : ''}
+${!hasNext && !hasRecent ? '8. Sin datos suficientes → responde solo: "Sin información disponible para esta jornada."' : ''}`
+
+  return {
+    systemPrompt: parts.join('\n'),
+    userInstruction,
+  }
+}
+
+
+/**
+ * Format games as a Markdown table grouped by phase.
+ * Notes are intentionally NOT shown in cells — they are passed to LLM via context only.
+ */
+export function formatScoreboardTable(games: ESPNGame[], localTZ?: string): string {
+  if (games.length === 0) return ''
+
+  const groups: Map<string, ESPNGame[]> = new Map()
+  for (const game of games) {
+    const key = game.phase ?? ''
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(game)
+  }
+
+  const buildRow = (game: ESPNGame): string => {
+    const home = game.home.team
+    const away = game.away.team
+    let center: string
+
+    if (game.status === 'final') {
+      center = `**${game.home.score} - ${game.away.score}**`
+    } else if (game.status === 'in_progress') {
+      const minute = game.statusDetail.match(/\d+'/)?.[0] ?? game.statusDetail
+      center = `${game.home.score}-${game.away.score} ${minute}`.trim()
+    } else {
+      const date = new Date(game.date)
+      const month = date.toLocaleDateString('es-MX', { month: 'numeric', day: 'numeric', timeZone: localTZ })
+      const time = date.toLocaleTimeString('es-MX', {
+        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: localTZ,
+      })
+      center = `${month} ${time}`
+    }
+
+    return `| ${home} | ${center} | ${away} |`
+  }
+
+  const parts: string[] = []
+
+  for (const [phase, phaseGames] of groups) {
+    if (phase && groups.size > 1) {
+      parts.push(`**${phase}**`)
+      parts.push('')
+    }
+    parts.push('| Local | Marcador | Visita |')
+    parts.push('|-------|----------|--------|')
+    for (const game of phaseGames) {
+      parts.push(buildRow(game))
+    }
+    parts.push('')
+  }
+
+  while (parts.length > 0 && parts[parts.length - 1] === '') parts.pop()
+  return parts.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Context formatters — for LLM injection (includes notes, phase, standings, news)
+// ---------------------------------------------------------------------------
+
 export function formatScoreboardContext(scoreboard: ESPNScoreboard, range: DateRange): string {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-
   const fromStr = range.from.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz })
   const toStr = range.to.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz })
 
@@ -527,33 +1018,251 @@ export function formatScoreboardContext(scoreboard: ESPNScoreboard, range: DateR
   const lines: string[] = [
     `=== ${scoreboard.league}${scoreboard.season ? ` — ${scoreboard.season}` : ''} ===`,
     `Periodo: ${fromStr} al ${toStr}`,
+    scoreboard.seasonPhase ? `Fase actual del torneo: ${scoreboard.seasonPhase}` : '',
     `Total de partidos: ${scoreboard.games.length}`,
     '',
-  ]
+  ].filter(Boolean)
+
+  const formatGameLine = (game: ESPNGame): string => {
+    const date = new Date(game.date)
+    const localDate = date.toLocaleDateString('es-MX', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })
+    const phaseNote = [game.phase, game.note].filter(Boolean).join(' — ')
+    const bracket = phaseNote ? ` [${phaseNote}]` : ''
+
+    if (game.status === 'final') {
+      const homeDisplay = game.home.winner ? `**${game.home.team}**` : game.home.team
+      const awayDisplay = game.away.winner ? `**${game.away.team}**` : game.away.team
+      return `• ${homeDisplay} ${game.home.score} - ${game.away.score} ${awayDisplay} (Final)${bracket} — ${localDate}`
+    }
+    if (game.status === 'in_progress') {
+      return `• ${game.home.team} ${game.home.score} - ${game.away.score} ${game.away.team} [${game.statusDetail}]${bracket} — EN VIVO`
+    }
+    const localTime = date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz })
+    return `• ${game.home.team} vs ${game.away.team}${bracket} — ${localDate} ${localTime}`
+  }
 
   if (live.length > 0) {
-    lines.push('⚡ EN VIVO:')
-    for (const g of live) lines.push(formatGameLine(g, tz))
+    lines.push('EN VIVO:')
+    live.forEach((g) => lines.push(formatGameLine(g)))
     lines.push('')
   }
-
   if (finals.length > 0) {
-    lines.push('✅ Resultados:')
-    for (const g of finals) lines.push(formatGameLine(g, tz))
+    lines.push('Resultados:')
+    finals.forEach((g) => lines.push(formatGameLine(g)))
     lines.push('')
   }
-
   if (scheduled.length > 0) {
-    lines.push('📅 Próximos partidos:')
-    for (const g of scheduled) lines.push(formatGameLine(g, tz))
+    lines.push('Proximos partidos:')
+    scheduled.forEach((g) => lines.push(formatGameLine(g)))
     lines.push('')
   }
-
   if (scoreboard.games.length === 0) {
     lines.push('No se encontraron partidos para este periodo.')
   }
 
-  lines.push('INSTRUCCIONES: Usa estos datos para responder la pregunta del usuario. Menciona marcadores específicos, equipos y fechas. Responde en el idioma en que el usuario escribió.')
-
   return lines.join('\n')
+}
+
+function formatNewsContext(articles: ESPNNewsArticle[], label: string): string {
+  if (articles.length === 0) return ''
+  const lines = [`Noticias — ${label}:`]
+  for (const a of articles) {
+    const date = a.published ? new Date(a.published).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : ''
+    lines.push(`• ${a.headline}${date ? ` (${date})` : ''}`)
+    if (a.description) lines.push(`  ${a.description.slice(0, 120)}`)
+  }
+  return lines.join('\n')
+}
+
+function formatStandingsContext(standings: ESPNStandings): string {
+  if (standings.groups.length === 0) return ''
+  const lines = [`Tabla de posiciones — ${standings.league}${standings.season ? ` (${standings.season})` : ''}:`]
+  for (const group of standings.groups) {
+    if (group.name) lines.push(`  ${group.name}:`)
+    // top 10 only to keep context lean
+    const top = group.entries.slice(0, 10)
+    for (const e of top) {
+      const pos = e.rank ? `${e.rank}.` : ''
+      const record = `${e.wins}G-${e.losses}P-${e.ties}E`
+      const pts = e.points ? ` | ${e.points}pts` : ''
+      const note = e.note ? ` (${e.note})` : ''
+      lines.push(`  ${pos} ${e.team} (${record}${pts})${note}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+function formatSummaryContext(summary: ESPNGameSummary): string {
+  const lines = [`Resumen — ${summary.home} ${summary.homeScore} - ${summary.awayScore} ${summary.away} (${summary.status}):`]
+  if (summary.keyEvents.length > 0) {
+    lines.push('  Eventos clave:')
+    summary.keyEvents.slice(0, 6).forEach((e) => lines.push(`  • ${e.minute ? e.minute + ' ' : ''}${e.text}`))
+  }
+  if (summary.topScorers.length > 0) {
+    lines.push('  Líderes:')
+    summary.topScorers.forEach((s) => lines.push(`  • ${s.name} (${s.team}): ${s.stat}`))
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Main orchestrator — buildSportsContext
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a complete sports context for the LLM based on the query.
+ *
+ * Strategy:
+ * - If a specific team is mentioned → fetch scoreboard + team news + standings (parallel)
+ *   and optionally game summaries for recent finals
+ * - If only a league is mentioned → fetch scoreboard + league news + standings (parallel)
+ *
+ * Returns both:
+ *   - `llmContext`: full text block for the LLM system prompt
+ *   - `tableOutput`: pre-rendered Markdown table for immediate TUI display
+ *   - `seasonPhase`: phase name for the commentary prompt
+ */
+export interface SportsQueryOutput {
+  llmContext: string
+  tableOutput: string
+  seasonPhase?: string
+  /** Raw scoreboard — passed through to TUI for structured commentary prompt */
+  scoreboard?: ESPNScoreboard
+}
+
+export async function buildSportsContext(query: string): Promise<SportsQueryOutput | null> {
+  const leagueSlug = detectLeague(query)
+  if (!leagueSlug) return null
+
+  const focusTeam = detectTeam(query)
+  const intent = detectDateIntent(query)
+  const hasExplicit = hasExplicitDateRange(query)
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  // --- Resolve scoreboard date range ---
+  let scoreboardRange: DateRange
+  if (intent === 'lastMatchday' || !hasExplicit) {
+    scoreboardRange = await getLastMatchdayRange(leagueSlug)
+  } else {
+    scoreboardRange = detectDateRange(query)
+  }
+
+  // --- Cached scoreboard fetch ---
+  const scoreboardKey = buildCacheKey(leagueSlug, scoreboardRange.from, scoreboardRange.to)
+  let scoreboard: ESPNScoreboard | undefined = getCachedScoreboard(scoreboardKey) ?? undefined
+  if (!scoreboard) {
+    try {
+      scoreboard = await getScoreboard(leagueSlug, scoreboardRange)
+      setCachedScoreboard(scoreboardKey, scoreboard)
+    } catch { /* scoreboard unavailable */ }
+  }
+
+  // --- Cached news fetch ---
+  const newsKey = buildNewsCacheKey(leagueSlug, focusTeam?.id)
+  let news: ESPNNewsArticle[] | undefined = getCachedNews(newsKey) ?? undefined
+  if (!news) {
+    try {
+      news = focusTeam?.id
+        ? await getTeamNews(leagueSlug, focusTeam.id, 5)
+        : await getLeagueNews(leagueSlug, 5)
+      setCachedNews(newsKey, news)
+    } catch { /* news unavailable */ }
+  }
+
+  // --- Cached standings fetch ---
+  const standingsKey = buildStandingsCacheKey(leagueSlug)
+  let standings: ESPNStandings | undefined = getCachedStandings(standingsKey) ?? undefined
+  if (!standings) {
+    try {
+      standings = await getStandings(leagueSlug)
+      setCachedStandings(standingsKey, standings)
+    } catch { /* standings unavailable */ }
+  }
+
+  // --- Optionally fetch game summaries for recent finals (max 2, only if team focused) ---
+  let summaries: ESPNGameSummary[] = []
+  if (focusTeam && scoreboard) {
+    const teamName = focusTeam.name.toLowerCase()
+    const recentFinals = scoreboard.games
+      .filter((g) =>
+        g.status === 'final' &&
+        (g.home.team.toLowerCase().includes(teamName) || g.away.team.toLowerCase().includes(teamName))
+      )
+      .slice(0, 2)
+
+    if (recentFinals.length > 0) {
+      const summaryResults = await Promise.allSettled(
+        recentFinals.map(async (g) => {
+          const summaryKey = buildSummaryCacheKey(leagueSlug, g.id)
+          const cached = getCachedSummary(summaryKey)
+          if (cached) return cached
+          const fetched = await getGameSummary(leagueSlug, g.id)
+          if (fetched) setCachedSummary(summaryKey, fetched)
+          return fetched
+        })
+      )
+      summaries = summaryResults
+        .filter((r): r is PromiseFulfilledResult<ESPNGameSummary> =>
+          r.status === 'fulfilled' && r.value !== null
+        )
+        .map((r) => r.value)
+    }
+  }
+
+  // --- Build table output (display) ---
+  const tableParts: string[] = []
+  if (scoreboard) {
+    const headerLine = `**${scoreboard.league}${scoreboard.season ? ` — ${scoreboard.season}` : ''}**`
+    const fromStr = scoreboard.effectiveRange.from.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', timeZone: tz })
+    const toStr = scoreboard.effectiveRange.to.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', timeZone: tz })
+    tableParts.push(headerLine)
+    tableParts.push(`_${fromStr} – ${toStr}_`)
+    if (scoreboard.seasonPhase) tableParts.push(`_${scoreboard.seasonPhase}_`)
+    tableParts.push('')
+
+    const live = scoreboard.games.filter((g) => g.status === 'in_progress')
+    const finals = scoreboard.games.filter((g) => g.status === 'final')
+    const scheduled = scoreboard.games.filter((g) => g.status === 'scheduled')
+
+    if (live.length > 0) { tableParts.push('EN VIVO'); tableParts.push(formatScoreboardTable(live, tz)); tableParts.push('') }
+    if (finals.length > 0) { tableParts.push('Resultados'); tableParts.push(formatScoreboardTable(finals, tz)); tableParts.push('') }
+    if (scheduled.length > 0) { tableParts.push('Proximos'); tableParts.push(formatScoreboardTable(scheduled, tz)); tableParts.push('') }
+    if (scoreboard.games.length === 0) tableParts.push('No se encontraron partidos para este periodo.')
+  }
+  while (tableParts.length > 0 && tableParts[tableParts.length - 1] === '') tableParts.pop()
+
+  // --- Build LLM context (includes notes, standings, news, summaries) ---
+  const contextParts: string[] = []
+
+  if (scoreboard) {
+    contextParts.push(formatScoreboardContext(scoreboard, scoreboard.effectiveRange))
+  }
+
+  if (standings) {
+    contextParts.push('')
+    contextParts.push(formatStandingsContext(standings))
+  }
+
+  for (const summary of summaries) {
+    contextParts.push('')
+    contextParts.push(formatSummaryContext(summary))
+  }
+
+  if (news && news.length > 0) {
+    const label = focusTeam
+      ? `Noticias recientes — ${focusTeam.name}`
+      : `Noticias recientes — ${scoreboard?.league ?? leagueSlug}`
+    contextParts.push('')
+    contextParts.push(formatNewsContext(news, label))
+  }
+
+  contextParts.push('')
+  contextParts.push('INSTRUCCIONES: Usa estos datos para responder la pregunta del usuario. Menciona marcadores específicos, fases del torneo, posiciones en la tabla y noticias relevantes. NO repitas datos que ya están en la tabla visual. Responde en el idioma en que el usuario escribió.')
+
+  return {
+    llmContext: contextParts.join('\n'),
+    tableOutput: tableParts.join('\n'),
+    seasonPhase: scoreboard?.seasonPhase,
+    scoreboard,
+  }
 }

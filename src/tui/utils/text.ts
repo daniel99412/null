@@ -34,7 +34,7 @@ export function formatMessage(
   role: "user" | "assistant",
   width: number,
 ): string[] {
-  const prefix = role === "user" ? "❯ " : "  ";
+  const prefix = role === "user" ? "> " : "  ";
   const wrapped = wrapText(content, width - 4);
   return wrapped.map((l, i) => (i === 0 ? prefix + l : "  " + l));
 }

@@ -3,15 +3,14 @@ import { fetchPageText } from '../tools/web-fetch.js'
 import { routeQuery } from './router.js'
 import { getCachedSearch, setCachedSearch } from '../memory/search-cache.js'
 import type { SearchContext } from '../tools/web-search.js'
+import { buildSportsContext } from '../tools/espn.js'
+import type { ESPNScoreboard } from '../tools/espn.js'
 import {
-  getScoreboard,
-  detectLeague,
-  detectDateRange,
-  detectDateIntent,
-  hasExplicitDateRange,
-  getLastMatchdayRange,
-  formatScoreboardContext,
-} from '../tools/espn.js'
+  extractPreferencesFromQuery,
+  addPreference,
+  buildPreferenceSavedMessage,
+  buildPreferencesContext,
+} from '../memory/preferences.js'
 import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/weather.js'
 import { getDefaultClient } from './llm-client.js'
 import type { ToolAction } from './toolAction.js'
@@ -25,6 +24,14 @@ export interface AgentResult {
   statusMessage: string | null
   /** true when router returned 'none' — caller may run ReAct loop */
   useReAct?: boolean
+  /** Pre-rendered ASCII table for sports results — display directly, bypass LLM rewrite */
+  tableOutput?: string
+  /** Current phase/stage of the tournament (e.g. "Clausura - Semifinals") */
+  seasonPhase?: string
+  /** Raw scoreboard data — used by TUI to build structured commentary prompt */
+  scoreboard?: ESPNScoreboard
+  /** When set, display this text directly without streaming through LLM */
+  directResponse?: string
 }
 
 interface FetchedArticle {
@@ -161,7 +168,7 @@ async function fetchArticlesAdaptive(
   // Fetch first article
   const first = await fetchOne(candidates[0])
   articles.push(first)
-  debugLog(`  ✓ Fetched [1]: ${candidates[0].title} (${first.content.length} chars)`)
+  debugLog(`  + Fetched [1]: ${candidates[0].title} (${first.content.length} chars)`)
 
   // If first article has sufficient content and wiki extract isn't needed, we're done
   if (hasUsefulContent(first.content, 2000) && !wikiExtractPresent) {
@@ -182,13 +189,13 @@ async function fetchArticlesAdaptive(
     if (result.status === 'fulfilled') {
       if (hasUsefulContent(result.value.content, minContentLength)) {
         articles.push(result.value)
-        debugLog(`  ✓ Fetched [${i + 2}]: ${remaining[i].title} (${result.value.content.length} chars)`)
+        debugLog(`  + Fetched [${i + 2}]: ${remaining[i].title} (${result.value.content.length} chars)`)
       } else {
-        debugLog(`  ✗ Skipped [${i + 2}] (no useful content): ${remaining[i].title}`)
+        debugLog(`  - Skipped [${i + 2}] (no useful content): ${remaining[i].title}`)
       }
     } else {
       articles.push({ title: remaining[i].title, url: remaining[i].url, content: remaining[i].snippet })
-      debugLog(`  ✗ Failed [${i + 2}], using snippet: ${remaining[i].title}`)
+      debugLog(`  - Failed [${i + 2}], using snippet: ${remaining[i].title}`)
     }
   }
 
@@ -275,40 +282,6 @@ export async function performSearch(query: string, originalTxt: string): Promise
   return null
 }
 
-// ─── Sports helpers ───────────────────────────────────────────────────────────
-
-export async function performSportsQuery(query: string): Promise<string | null> {
-  const leagueSlug = detectLeague(query)
-  if (!leagueSlug) {
-    debugLog('No league detected — falling back to webSearch')
-    return null
-  }
-
-  const intent = detectDateIntent(query)
-  const hasExplicit = hasExplicitDateRange(query)
-
-  try {
-    if (intent === 'lastMatchday' || !hasExplicit) {
-      debugLog(`Sports query: league=${leagueSlug}, intent=${intent === 'lastMatchday' ? 'lastMatchday' : 'auto-lastMatchday'}`)
-      const range = await getLastMatchdayRange(leagueSlug)
-      debugLog(`Last matchday range: ${range.from.toISOString().slice(0, 10)} to ${range.to.toISOString().slice(0, 10)}`)
-      const scoreboard = await getScoreboard(leagueSlug, range)
-      debugLog(`ESPN returned ${scoreboard.games.length} games`)
-      return formatScoreboardContext(scoreboard, scoreboard.effectiveRange)
-    }
-
-    const explicitRange = detectDateRange(query)
-    debugLog(`Sports query: league=${leagueSlug}, range=${explicitRange.from.toISOString().slice(0, 10)} to ${explicitRange.to.toISOString().slice(0, 10)}`)
-
-    const scoreboard = await getScoreboard(leagueSlug, explicitRange)
-    debugLog(`ESPN returned ${scoreboard.games.length} games`)
-    return formatScoreboardContext(scoreboard, scoreboard.effectiveRange)
-  } catch (err) {
-    debugLog(`ESPN API error: ${err}`)
-    return null
-  }
-}
-
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 /**
@@ -330,12 +303,12 @@ export async function processQuery(
     : query
 
   if (isExplicitSearch) {
-    onStatus?.('🔍 Searching the web...')
+    onStatus?.('Searching the web...')
     const result = await performSearch(searchQuery, query)
     return {
       userContent: result ? searchQuery : query,
       searchContext: result?.contextMessage ?? null,
-      statusMessage: '🔍 Searching the web...',
+      statusMessage: 'Searching the web...',
     }
   }
 
@@ -353,7 +326,7 @@ export async function processQuery(
   }
 
   if (decision === 'getWeather') {
-    onStatus?.('🌤 Obteniendo clima...')
+    onStatus?.('Obteniendo clima...')
     try {
       const city = extractCityFromQuery(query)
       debugLog(`Weather query — city extracted: ${city ?? '(none, using IP location)'}`)
@@ -364,26 +337,47 @@ export async function processQuery(
       return {
         userContent: `${ctx}\n\nPregunta del usuario: ${query}`,
         searchContext: null,
-        statusMessage: '🌤 Obteniendo clima...',
+        statusMessage: 'Obteniendo clima...',
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       return {
         userContent: `No se pudo obtener el clima: ${errMsg}. Informa al usuario de forma amable.`,
         searchContext: null,
-        statusMessage: '🌤 Obteniendo clima...',
+        statusMessage: 'Obteniendo clima...',
       }
     }
   }
 
-  if (decision === 'sportsQuery') {
-    onStatus?.('⚽ Consultando resultados deportivos...')
-    const sportsCtx = await performSportsQuery(query)
-    if (sportsCtx) {
+  if (decision === 'savePreference') {
+    const extracted = extractPreferencesFromQuery(query)
+    if (extracted.length > 0) {
+      for (const p of extracted) {
+        addPreference(p.category, p.value, p.label)
+        debugLog(`Saved preference: ${p.category}=${p.value}`)
+      }
+      const msg = buildPreferenceSavedMessage(extracted)
       return {
         userContent: query,
-        searchContext: sportsCtx,
-        statusMessage: '⚽ Consultando resultados deportivos...',
+        searchContext: null,
+        statusMessage: null,
+        directResponse: msg,
+      }
+    }
+    // Couldn't extract specifics — fall through to LLM
+  }
+
+  if (decision === 'sportsQuery') {
+    onStatus?.('Consultando resultados deportivos...')
+    const sportsResult = await buildSportsContext(query)
+    if (sportsResult) {
+      return {
+        userContent: query,
+        searchContext: sportsResult.llmContext,
+        statusMessage: 'Consultando resultados deportivos...',
+        tableOutput: sportsResult.tableOutput,
+        seasonPhase: sportsResult.seasonPhase,
+        scoreboard: sportsResult.scoreboard,
       }
     }
     // League not recognized — fall back to web search
@@ -391,24 +385,24 @@ export async function processQuery(
     return {
       userContent: query,
       searchContext: result?.contextMessage ?? null,
-      statusMessage: '⚽ Consultando resultados deportivos...',
+      statusMessage: 'Consultando resultados deportivos...',
     }
   }
 
   if (decision === 'webSearch') {
-    onStatus?.('🔍 Searching the web...')
+    onStatus?.('Searching the web...')
     try {
       const result = await performSearch(searchQuery, query)
       return {
         userContent: query,
         searchContext: result?.contextMessage ?? null,
-        statusMessage: '🔍 Searching the web...',
+        statusMessage: 'Searching the web...',
       }
     } catch {
       return {
         userContent: `${query}\n\n[Note: Web search failed due to a network error. Answer from your knowledge and mention you could not verify current information.]`,
         searchContext: null,
-        statusMessage: '🔍 Searching the web...',
+        statusMessage: 'Searching the web...',
       }
     }
   }
@@ -583,7 +577,7 @@ export async function processQueryWithReAct(
       // if so, force a web_search rather than returning a vague answer.
       if (i === 0 && looksUncertain(fullResponse)) {
         debugLog('ReAct: LLM uncertain on first pass — forcing web_search')
-        onStatus?.('🔍 Searching the web...')
+        onStatus?.('Searching the web...')
         onToolCall?.('web_search')
         let searchObservation: string
         try {
@@ -610,14 +604,14 @@ export async function processQueryWithReAct(
     onToolCall?.(toolName)
 
     const statusLabels: Record<string, string> = {
-      get_time: '🕐 Getting time...',
-      get_weather: '🌤 Getting weather...',
-      web_search: '🔍 Searching the web...',
-      web_fetch: '🌐 Fetching page...',
-      get_location: '📍 Getting location...',
-      sports_query: '⚽ Fetching sports data...',
+      get_time: 'Getting time...',
+      get_weather: 'Getting weather...',
+      web_search: 'Searching the web...',
+      web_fetch: 'Fetching page...',
+      get_location: 'Getting location...',
+      sports_query: 'Fetching sports data...',
     }
-    onStatus?.(statusLabels[toolName] ?? `🔧 Running ${toolName}...`)
+    onStatus?.(statusLabels[toolName] ?? `Running ${toolName}...`)
 
     let observation: string
     try {
@@ -639,7 +633,7 @@ export async function processQueryWithReAct(
 
   // Exhausted iterations — ask LLM to produce a final answer with whatever it has
   debugLog('ReAct: max iterations reached, requesting final answer')
-  onStatus?.('💭 Composing answer...')
+  onStatus?.('Composing answer...')
   messages.push({
     role: 'user',
     content: `Please provide your final answer now based on the information collected so far.\n${langInstruction}`,

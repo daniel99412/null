@@ -22,7 +22,7 @@ Rules:
 Respond ONLY with valid JSON. No text before or after.
 { "tool": "webSearch" | "getDateTime" | "getWeather" | "none" | "sportsQuery" , "confidence": number }`.trim()
 
-export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'none'
+export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'savePreference' | 'none'
 
 export interface RouterResult {
   decision: RoutingDecision
@@ -105,6 +105,18 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(jugó|jugara|jugará)/i, intent: 'sportsQuery', weight: 8, description: 'played/will play' },
   { pattern: /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i, intent: 'sportsQuery', weight: 10, description: 'match of + time' },
 
+  // ── SAVEPREFERENCE — user stating personal sports preference ──────────────
+  { pattern: /\bmi equipo(s)? (favorito|fav|preferido)(s)? (es|son|de f[uú]tbol (es|son))\b/i, intent: 'savePreference', weight: 20, description: 'my favorite team' },
+  { pattern: /\bmi(s)? (club|equipos?|ligas?|deportes?)(s)? (favorito|preferido|fav)(s)? (es|son)\b/i, intent: 'savePreference', weight: 20, description: 'my favorite club/league/sport' },
+  { pattern: /\b(soy del|soy de|le voy al?|le voy a(l)?) \b/i, intent: 'savePreference', weight: 15, description: 'I support team' },
+  { pattern: /\b(soy|soy un) (aficionado|fan|seguidor) (de(l)?|al?)\b/i, intent: 'savePreference', weight: 15, description: 'I am a fan of' },
+  { pattern: /\bsigo (al?|a|la|las|el|los)\b/i, intent: 'savePreference', weight: 15, description: 'I follow (sigo)' },
+  { pattern: /\btambi[eé]n sigo\b/i, intent: 'savePreference', weight: 15, description: 'también sigo' },
+  { pattern: /\bme gusta(n)? (el|los|la|las)\b/i, intent: 'savePreference', weight: 14, description: 'me gusta(n)' },
+  { pattern: /\bmy (favorite|favourite) (team|club|sport|league) (is|are)\b/i, intent: 'savePreference', weight: 20, description: 'my favorite team (EN)' },
+  { pattern: /\bI('m| am) a(n?)? .+ fan\b/i, intent: 'savePreference', weight: 15, description: 'I am a fan (EN)' },
+  { pattern: /\bI (support|follow|root for)\b/i, intent: 'savePreference', weight: 12, description: 'I support/follow (EN)' },
+
   // ── WEBSEARCH — recency / news ────────────────────────────────────────────
   { pattern: /\b(20[2-9][4-9]|20[3-9]\d)\b/, intent: 'webSearch', weight: 10, description: 'year post-cutoff' },
   { pattern: /\b(hoy|today|ahorita|ahora|right now)\b.*\b(precio|price|clima|weather|dólar|dollar)\b/i, intent: 'webSearch', weight: 10, description: 'today + price/rate' },
@@ -120,6 +132,7 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
     getDateTime: 0,
     getWeather: 0,
     sportsQuery: 0,
+    savePreference: 0,
     none: 0,
   }
 
@@ -194,7 +207,7 @@ export async function routeQuery(query: string): Promise<RouterResult> {
       ROUTER_SYSTEM_PROMPT,
     )
     const parsed = JSON.parse(llmResponse) as { tool: RoutingDecision; confidence: number }
-    if (['webSearch', 'getDateTime', 'getWeather', 'sportsQuery', 'none'].includes(parsed.tool)) {
+    if (['webSearch', 'getDateTime', 'getWeather', 'sportsQuery', 'savePreference', 'none'].includes(parsed.tool)) {
       if (parsed.tool === 'none' && parsed.confidence < 0.7) {
         return { decision: 'webSearch', confidence: parsed.confidence, source: 'llm' }
       }

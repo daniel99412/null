@@ -1,6 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { streamChat } from '../core/ollama.js'
+import { getCommentaryClient } from '../core/llm-client.js'
+import { buildSportsCommentaryPrompt } from '../tools/espn.js'
+import { buildPreferencesContext } from '../memory/preferences.js'
 import { useLoading } from './hooks/useLoading.js'
 import { useCursor } from './hooks/useCursor.js'
 import { Splash } from './components/Splash.js'
@@ -295,6 +298,18 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           return copy
         })
 
+        // Direct response — no LLM needed (e.g. preference saved confirmation)
+        if (agentResult.directResponse) {
+          updateMessages((m) => {
+            const copy = [...m]
+            const last = copy[copy.length - 1]
+            if (last?.role === 'assistant') last.content = agentResult.directResponse!
+            return copy
+          })
+          buffer.current = agentResult.directResponse
+          return
+        }
+
         // If router returned 'none', run the ReAct loop so the LLM can
         // self-direct tool usage if needed, rather than a blind streamChat.
         if (agentResult.useReAct && !isExplicitSearch) {
@@ -313,7 +328,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
               updateMessages((m) => {
                 const copy = [...m]
                 const last = copy[copy.length - 1]
-                if (last?.role === 'assistant') last.content = `🔧 Using tool: ${toolName}...`
+                if (last?.role === 'assistant') last.content = `Using tool: ${toolName}...`
                 return copy
               })
             },
@@ -327,6 +342,74 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             return copy
           })
           buffer.current = reactResult.answer
+          return
+        }
+
+        // Sports query — show table immediately, then stream LLM commentary below
+        if (agentResult.tableOutput) {
+          // Step 1: render the table right away so the user sees data instantly
+          updateMessages((m) => {
+            const copy = [...m]
+            const last = copy[copy.length - 1]
+            if (last?.role === 'assistant') last.content = agentResult.tableOutput!
+            return copy
+          })
+
+          // Step 2: build a structured, date-ordered commentary prompt
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+          let commentMessages: { role: string; content: string }[]
+
+          if (agentResult.scoreboard) {
+            const prefsCtx = buildPreferencesContext() ?? undefined
+            const { systemPrompt, userInstruction } = buildSportsCommentaryPrompt(
+              agentResult.scoreboard,
+              txt,
+              tz,
+              prefsCtx,
+            )
+            // Debug log
+            process.stderr.write(`[null-debug] === SPORTS COMMENTARY PROMPT (structured) ===\n`)
+            process.stderr.write(`[null-debug] System:\n${systemPrompt}\n`)
+            process.stderr.write(`[null-debug] User instruction:\n${userInstruction}\n`)
+            process.stderr.write(`[null-debug] === END PROMPT ===\n`)
+
+            commentMessages = [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userInstruction },
+            ]
+          } else {
+            // Fallback: no scoreboard, use raw context
+            const sportSystemContent = agentResult.searchContext ?? ''
+            commentMessages = [
+              ...(sportSystemContent ? [{ role: 'system', content: sportSystemContent }] : []),
+              {
+                role: 'user',
+                content: `${txt}\n\nEscribe 2-4 líneas de comentario deportivo basado SOLO en los datos anteriores. No inventes nada.`,
+              },
+            ]
+          }
+
+          const commentaryClient = getCommentaryClient()
+          let commentary = ''
+          await commentaryClient.streamChat(
+            commentMessages.map((m) => ({
+              role: m.role as 'system' | 'user' | 'assistant',
+              content: m.content,
+            })),
+            (tok) => {
+              commentary += tok
+              updateMessages((m) => {
+                const copy = [...m]
+                const last = copy[copy.length - 1]
+                if (last?.role === 'assistant') {
+                  last.content = `${agentResult.tableOutput!}\n\n${commentary}`
+                }
+                return copy
+              })
+            },
+          )
+
+          buffer.current = `${agentResult.tableOutput}\n\n${commentary}`
           return
         }
 

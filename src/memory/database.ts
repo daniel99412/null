@@ -57,8 +57,27 @@ export function getDb(): Database.Database {
       ttl_seconds INTEGER NOT NULL DEFAULT 300
     );
 
-    CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+    CREATE TABLE IF NOT EXISTS espn_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cache_key TEXT NOT NULL UNIQUE,
+      result TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      ttl_seconds INTEGER NOT NULL DEFAULT 86400
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_espn_cache_key ON espn_cache(cache_key);
     CREATE INDEX IF NOT EXISTS idx_session_summaries_session_id ON session_summaries(session_id);
+
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      value TEXT NOT NULL,
+      label TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(category, value)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_preferences_category ON user_preferences(category);
   `)
 
   // Migration: add status column if missing (for existing DBs)
