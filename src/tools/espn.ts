@@ -992,6 +992,8 @@ export interface SportsQueryOutput {
   seasonPhase?: string
   /** Raw scoreboard — passed through to TUI for structured commentary prompt */
   scoreboard?: ESPNScoreboard
+  /** True when the query is primarily about news/headlines — TUI skips scoreboard commentary */
+  newsIntent?: boolean
 }
 
 /**
@@ -1136,6 +1138,21 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   }
   while (tableParts.length > 0 && tableParts[tableParts.length - 1] === '') tableParts.pop()
 
+  // When news intent, append news headlines to the visual table output
+  if (newsIntent && news && news.length > 0) {
+    const teamLabel = focusTeam ? focusTeam.name : (scoreboard?.league ?? leagueSlug)
+    tableParts.push('')
+    tableParts.push(`**Noticias — ${teamLabel}**`)
+    tableParts.push('')
+    for (const a of news) {
+      const date = a.published
+        ? new Date(a.published).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })
+        : ''
+      tableParts.push(`- ${a.headline}${date ? ` _(${date})_` : ''}`)
+      if (a.description) tableParts.push(`  ${a.description.slice(0, 120)}`)
+    }
+  }
+
   // --- Build LLM context (includes notes, standings, news, summaries) ---
   const contextParts: string[] = []
 
@@ -1191,5 +1208,6 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
     tableOutput: tableParts.join('\n'),
     seasonPhase: scoreboard?.seasonPhase,
     scoreboard,
+    newsIntent,
   }
 }

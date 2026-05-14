@@ -32,6 +32,8 @@ export interface AgentResult {
   seasonPhase?: string
   /** Raw scoreboard data — used by TUI to build structured commentary prompt */
   scoreboard?: ESPNScoreboard
+  /** True when query was primarily about news — TUI should skip scoreboard commentary */
+  newsIntent?: boolean
   /** When set, display this text directly without streaming through LLM */
   directResponse?: string
 }
@@ -391,8 +393,9 @@ export async function processQuery(
         searchContext: llmContext,
         statusMessage: 'Consultando resultados deportivos...',
         tableOutput: sportsResult.tableOutput,
-        seasonPhase: sportsResult.seasonPhase,
-        scoreboard: sportsResult.scoreboard,
+          seasonPhase: sportsResult.seasonPhase,
+          scoreboard: sportsResult.scoreboard,
+          newsIntent: sportsResult.newsIntent,
       }
     }
 
@@ -420,6 +423,7 @@ export async function processQuery(
           tableOutput: retryResult.tableOutput,
           seasonPhase: retryResult.seasonPhase,
           scoreboard: retryResult.scoreboard,
+          newsIntent: retryResult.newsIntent,
         }
       }
       debugLog(`ESPN retry also failed — falling back to webSearch with enriched query`)

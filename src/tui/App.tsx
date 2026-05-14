@@ -366,11 +366,22 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             return copy
           })
 
-          // Step 2: build a structured, date-ordered commentary prompt
+          // Step 2: build commentary prompt
+          // For news intent, skip scoreboard commentary — use news context directly
           const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
           let commentMessages: { role: string; content: string }[]
 
-          if (agentResult.scoreboard) {
+          if (agentResult.newsIntent) {
+            // News query: comment based on headlines, not the scoreboard
+            const newsContext = agentResult.searchContext ?? ''
+            commentMessages = [
+              ...(newsContext ? [{ role: 'system', content: newsContext }] : []),
+              {
+                role: 'user',
+                content: `${txt}\n\nResume las noticias más relevantes del equipo en 2-4 líneas. Usa SOLO los titulares de arriba. No inventes nada. Responde en español.`,
+              },
+            ]
+          } else if (agentResult.scoreboard) {
             const prefsCtx = buildPreferencesContext() ?? undefined
             const { systemPrompt, userInstruction } = buildSportsCommentaryPrompt(
               agentResult.scoreboard,
