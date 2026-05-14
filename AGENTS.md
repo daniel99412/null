@@ -12,8 +12,8 @@
 - **Module:** ESM (`"type": "module"`)
 - **CLI Framework:** Commander
 - **LLM Runtime:** Ollama (local)
-- **Database:** SQLite (for memory/conversations)
-- **TUI:** Ink (React-based, planned)
+- **Database:** SQLite (`better-sqlite3`) at `~/.null-cli/null.db`
+- **TUI:** Ink (React-based, active)
 - **Package Manager:** pnpm
 
 ---
@@ -22,11 +22,38 @@
 
 ```
 src/
-├── index.ts          # Entry point
-├── tools/            # Tool system (filesystem, web search, etc.)
-├── llm/              # Ollama integration
-├── memory/           # SQLite-based conversation storage
-└── utils/            # Helpers
+├── index.ts                  # Entry point
+├── config/
+│   └── index.ts              # NullConfig, DEFAULT_OLLAMA_URL, routerModel
+├── core/
+│   ├── agent.ts              # Main query pipeline (routing → tools → LLM)
+│   ├── intent-classifier.ts  # CLLM: semantic intent classification with cache
+│   ├── llm-client.ts         # getDefaultClient() / getRouterClient()
+│   ├── ollama.ts             # streamChat() with DEFAULT_SYSTEM_PROMPT
+│   └── router.ts             # Heuristic scorer + CLLM fallback → RoutingDecision
+├── memory/
+│   ├── database.ts           # SQLite schema, getDb(), seedAliases()
+│   ├── memory-extractor.ts   # Extract memories from user messages (LLM-based)
+│   ├── memory-gate.ts        # Decide if a message is worth extracting from
+│   ├── memory-retrieval.ts   # retrieveMemories(), buildMemoryContext(), buildGeneralMemoryContext()
+│   ├── memory-store.ts       # upsertMemory(), getMemoriesByType(), searchMemories()
+│   ├── preferences.ts        # extractPreferencesFromQuery() (reads DB)
+│   └── search-cache.ts       # TTL-based search result cache
+├── seeds/
+│   └── aliases.json          # ~104 sports alias seeds (copied to dist/seeds/ at build)
+├── tools/
+│   └── espn.ts               # ESPN API: scores, standings, news; detectLeague/detectTeam from DB
+├── tui/
+│   ├── App.tsx               # Main TUI app, routing dispatch, streamChat calls
+│   ├── components/
+│   │   ├── Input.tsx         # Dynamic-height input box (grows with text wrap)
+│   │   └── ...               # Header, Footer, MessageList, CommandPalette, etc.
+│   ├── context/
+│   │   └── ThemeContext.tsx  # Accent color theme
+│   └── hooks/                # useInput, useSession, etc.
+└── utils/
+    ├── debug.ts              # debugLog() — writes to stderr when NULL_DEBUG=1
+    └── normalize.ts          # normalizeQuery()
 ```
 
 ---
@@ -36,11 +63,12 @@ src/
 | Action | Command | Notes |
 |--------|---------|-------|
 | Development | `pnpm dev` | Uses tsx for hot reload |
-| Build | `pnpm build` | Compiles to `dist/` |
+| Build | `pnpm build` | `tsc && cp -r src/seeds dist/seeds` |
 | Start | `pnpm start` | Runs compiled JS |
 | Commit | `pnpm commit` | Interactive commitizen |
 | Lint | (not configured) | Run before PRs |
-| Typecheck | `pnpm tsc --noEmit` | Verify types |
+| Typecheck | `npx tsc --noEmit` | Verify types |
+| Debug | `NULL_DEBUG=1 pnpm start 2>debug.log` | Logs to stderr without polluting TUI |
 
 ---
 
@@ -68,54 +96,99 @@ src/
 
 ---
 
-## Tool System
+## Routing System
 
-Null uses a tool-based architecture. Tools are functions the LLM can call to perform actions:
+Queries go through a two-stage router before reaching the LLM:
 
-### Existing Tools
-- `bash` — Execute shell commands
-- `read` — Read file contents
-- `write` — Write files to disk
-- `grep` — Search file contents
-- `glob` — Find files by pattern
-- `graphify` — Knowledge graph from codebase (`/graphify <path>`) — installed as `graphifyy` Python package
+### Stage 1 — Heuristic scorer (`router.ts`)
+Weighted regex signals accumulate scores per `RoutingDecision`. Thresholds:
+- `score >= 8` → confidence 1.0, decide immediately
+- `score >= 5` → confidence 0.85, decide immediately
+- `score < 5` → fall back to CLLM
 
-### Planned Tools
-- Web search/fetch
-- Google Calendar integration
-- Jira integration
-- API calls
+### Stage 2 — CLLM (`intent-classifier.ts`)
+Small model (`qwen2.5:3b`) classifies into `{ category, intent, anchor }`.
+- In-memory cache: key = `sha1(last 4 msgs + query)`, TTL 5 min
+- Returns up to 2 intents for mixed queries
+- `mapCLLMToDecision()` translates to `RoutingDecision`
 
-When adding new tools:
-1. Define tool schema with name, description, parameters
-2. Register in tool registry
-3. Add to LLM system prompt
-4. Document here
+### RoutingDecision values
+| Decision | Trigger |
+|----------|---------|
+| `sportsQuery` | scores, standings, fixtures → ESPN |
+| `webSearch` | news, current events, transfers |
+| `getDateTime` | time/date questions |
+| `getWeather` | weather queries |
+| `savePreference` | "soy del Atlas", "me gusta..." |
+| `none` | conversation, factual, code → ReAct loop |
+
+### Key routing rules
+- Greetings, "cómo estás", "quién eres", "cómo me llamo" → always `none` (weight 12–20)
+- Sports news/transfers → `webSearch` (weight 14–18), not `sportsQuery`
+- CLLM low-confidence `webSearch` (< 0.6) → downgraded to `none` (ReAct decides)
+- `none` + recency signal → overridden to `webSearch`
+
+---
+
+## Memory System
+
+### Database tables
+- `memories` — type, value (normalized), raw_value, confidence, source, expires_at
+- `memory_scores` — recurrence scoring (+0.05 per repeat, capped 1.0)
+- `memory_aliases` — canonical alias resolution (e.g. "ligamx" → "liga mx")
+- `memory_relations`, `memory_events`, `retrieval_logs`
+- `espn_leagues`, `espn_teams` — ESPN catalog (seeded at DB init)
+
+### Memory types
+| Type | Permanent | Weight |
+|------|-----------|--------|
+| `alias_self` | yes | 1.0 |
+| `preference` | yes | 0.9 |
+| `occupation` | yes | 0.85 |
+| `tech_stack` | yes | 0.8 |
+| `behavior` | yes | 0.75 |
+| `dislike` | yes | 0.75 |
+| `location` | yes | 0.75 |
+| `relationship` | yes | 0.75 |
+| `goal` | 180 days | 0.7 |
+| `project` | 90 days | 0.6 |
+
+### Memory injection
+- `buildGeneralMemoryContext(query)` called in `processQueryWithReAct()` before building messages
+- Injected as a system message with header: `[Known facts about the user you are talking to. Use this to answer personal questions about them, NOT about yourself.]`
+- Sports queries use `buildSportsMemoryContext()` (only `preference` type)
+- `src/seeds/aliases.json` seeded at DB init; must be copied to `dist/seeds/` at build
 
 ---
 
 ## LLM Integration
 
 - Ollama runs locally (default: `http://localhost:11434`)
-- Uses JSON structured output for tool calls
-- Model: configurable (default: `qwen2.5-coder:7b`)
+- Default model: `qwen2.5:3b` (router + CLLM); larger model for user responses
+- Temperature: 0.3 when grounding on external data; default (0.8) for free conversation
 
-### Prompt Structure
+### Prompt layers
 ```
-1. System prompt with capabilities and constraints
-2. Available tools with schemas
-3. Conversation history
-4. User request
+1. DEFAULT_SYSTEM_PROMPT (ollama.ts) — identity "You are Null", tool list, grounding rules
+2. Memory context block — user facts injected when available
+3. Conversation history (filtered: no system messages from prior turns)
+4. Search/weather/sports context as system message (if tool was used)
+5. User message
 ```
+
+### ReAct loop (`processQueryWithReAct`)
+- Up to 3 iterations; LLM emits JSON tool calls or plain-text final answer
+- Auto-forces `web_search` if first response looks uncertain (`looksUncertain()`)
+- Memory context injected into system prompt on every call
 
 ---
 
-## Memory System
+## TUI
 
-- SQLite database for persistent storage
-- Sessions track conversation context
-- Old conversations are summarized to save tokens
-- TTL for casual conversations (configurable)
+- Built with Ink (React for CLI)
+- `Input.tsx` — dynamic height: grows to fit wrapped text based on terminal width
+- `App.tsx` — main dispatch: routes `AgentResult` to appropriate LLM call path
+- Sports commentary path uses separate `commentaryClient` with `buildSportsCommentaryPrompt()`
 
 ---
 
@@ -129,16 +202,26 @@ When adding new tools:
 
 **ALWAYS**
 - Run typecheck after changes: `npx tsc --noEmit`
-- Test changes before committing
+- Build before testing: `pnpm build` (`tsc && cp -r src/seeds dist/seeds`)
 - Follow existing code patterns
+- Commit on branch `develop`
 
 ---
 
 ## Git Workflow
 
+- All work on branch `develop`
 - Commit messages follow conventional commits (`feat:`, `fix:`, `docs:`, etc.)
 - Use `pnpm commit` for interactive commits
 - Husky pre-commit hooks enabled
+
+### Recent commits (develop)
+| Hash | Description |
+|------|-------------|
+| `3fbdd80` | fix(memory): clarify user context header to avoid LLM perspective confusion |
+| `6e759fe` | fix(router): add greeting/identity signals and fix CLLM low-confidence rule |
+| `c0afba9` | fix(agent): inject memory context into ReAct system prompt + dynamic input height |
+| `ddca311` | feat(router): replace LLM fallback with CLLM intent-classifier |
 
 ---
 
@@ -152,10 +235,22 @@ When adding new tools:
 When working on Null:
 
 1. **Understand the goal first** — This is a virtual secretary, not just a code generator
-2. **Think about tools** — Can existing tools handle this? Should a new tool be added?
-3. **Consider the user** — The output should be useful in a terminal context
-4. **Preserve context** — Memory and conversation history are important
-5. **Be helpful** — Answer questions thoroughly, including web research when needed
+2. **Think about routing** — Every query goes through heuristic → CLLM → decision
+3. **Memory is personal** — Facts about the user, not the assistant
+4. **Consider the user** — The output should be useful in a terminal context
+5. **Preserve context** — Memory and conversation history are important
+6. **Be helpful** — Answer questions thoroughly, including web research when needed
+
+---
+
+## Known Behaviors & Gotchas
+
+- ESPN `teams/{id}/news` returns `{}` for Liga MX — workaround: filter `leagueNews` by team name
+- `src/seeds/aliases.json` must be in `dist/seeds/` at runtime — build copies it
+- `NULL_DEBUG=1` activates debug logs to stderr without contaminating TUI stdout
+- `PERMANENT_TYPES` memories never decay: `preference, tech_stack, occupation, behavior, dislike, location, alias_self`
+- Small model (`qwen2.5:3b`) is unreliable for classifying greetings/personal questions — handle via heuristic signals
+- Memory context header must say "about the user you are talking to" — otherwise LLM adopts user's name as its own
 
 ---
 
@@ -163,13 +258,5 @@ When working on Null:
 
 After any code change:
 ```bash
-pnpm build && pnpm tsc --noEmit
+pnpm build && npx tsc --noEmit
 ```
-
----
-
-## Notes
-
-- This project prioritizes local-first, privacy-preserving design
-- Ollama must be running locally for full functionality
-- The CLI should feel fast and responsive
