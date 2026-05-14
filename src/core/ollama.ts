@@ -20,6 +20,7 @@ export async function streamChat(
   onToken: (token: string) => void,
   customMessages?: { role: string; content: string }[],
   systemPrompt?: string,
+  options?: { temperature?: number },
 ): Promise<string> {
   const messages = customMessages || [
     {
@@ -37,5 +38,5 @@ export async function streamChat(
   ]
 
   const client = getDefaultClient()
-  return client.streamChat(fullMessages, onToken)
+  return client.streamChat(fullMessages, onToken, options)
 }

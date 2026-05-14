@@ -579,14 +579,19 @@ export async function processQueryWithReAct(
     { role: 'user', content: query },
   ]
 
+  let hasExternalData = false  // becomes true once any tool result is injected
+
   for (let i = 0; i < maxIterations; i++) {
     debugLog(`ReAct iteration ${i + 1}/${maxIterations}`)
+
+    // Use lower temperature when grounding on external tool data to reduce hallucinations
+    const iterOptions = hasExternalData ? { temperature: 0.3 } : undefined
 
     // Non-streaming call so we can inspect the full response before acting
     let fullResponse = ''
     await client.streamChat(messages, (tok) => {
       fullResponse += tok
-    })
+    }, iterOptions)
 
     debugLog(`ReAct LLM response: ${fullResponse.slice(0, 120)}...`)
 
@@ -611,6 +616,7 @@ export async function processQueryWithReAct(
           role: 'user',
           content: `[Web search results for "${query}"]\n${searchObservation}\n\nNow answer the user's original question using the above data. Be specific and detailed.\n${langInstruction}`,
         })
+        hasExternalData = true
         continue
       }
       // LLM produced a confident final answer
@@ -649,6 +655,7 @@ export async function processQueryWithReAct(
       role: 'user',
       content: `[Tool result for ${toolName}]\n${observation}\n\nNow answer the user's original question using the above data.\n${langInstruction}`,
     })
+    hasExternalData = true
   }
 
   // Exhausted iterations — ask LLM to produce a final answer with whatever it has
@@ -662,7 +669,7 @@ export async function processQueryWithReAct(
   let finalAnswer = ''
   await client.streamChat(messages, (tok) => {
     finalAnswer += tok
-  })
+  }, hasExternalData ? { temperature: 0.3 } : undefined)
 
   return { answer: finalAnswer, iterations: maxIterations }
 }

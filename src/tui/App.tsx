@@ -418,6 +418,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
                 return copy
               })
             },
+            { temperature: 0.3 },
           )
 
           buffer.current = `${agentResult.tableOutput}\n\n${commentary}`
@@ -430,6 +431,10 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         }
         history.push({ role: 'user', content: agentResult.userContent })
 
+        // Use lower temperature when grounding response in external data (webSearch)
+        // to reduce hallucinations. Free conversation keeps default (0.8).
+        const chatOptions = agentResult.searchContext ? { temperature: 0.3 } : undefined
+
         await streamChat('', (tok) => {
           buffer.current += tok
           updateMessages((m) => {
@@ -440,7 +445,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             }
             return copy
           })
-        }, history)
+        }, history, undefined, chatOptions)
       }
 
       sendToLLM().then(() => {

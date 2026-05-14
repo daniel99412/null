@@ -12,6 +12,7 @@ export interface LLMClient {
   streamChat(
     messages: ChatMessage[],
     onToken: (token: string) => void,
+    options?: { temperature?: number },
   ): Promise<string>
 
   /** Non-streaming — for router classification and summarization */
@@ -24,6 +25,7 @@ interface OllamaChatBody {
   model: string
   stream: boolean
   messages: { role: string; content: string }[]
+  options?: { temperature?: number }
 }
 
 interface OllamaStreamChunk {
@@ -42,11 +44,12 @@ export function createOllamaClient(options: {
   const endpoint = `${baseUrl}/api/chat`
 
   return {
-    async streamChat(messages, onToken) {
+    async streamChat(messages, onToken, options) {
       const body: OllamaChatBody = {
         model,
         stream: true,
         messages,
+        ...(options?.temperature !== undefined && { options: { temperature: options.temperature } }),
       }
 
       const res = await fetch(endpoint, {
