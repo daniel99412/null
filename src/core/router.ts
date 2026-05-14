@@ -106,9 +106,14 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(juega|juegan|jugaron)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 8, description: 'plays/played' },
   { pattern: /(?:^|\s)(jugó|jugara|jugará)/i, intent: 'sportsQuery', weight: 8, description: 'played/will play' },
   { pattern: /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i, intent: 'sportsQuery', weight: 10, description: 'match of + time' },
-  // "noticias de mi equipo / club / deporte" → always sports, not webSearch
-  { pattern: /\bnoticias?\b.*\b(mi\s+equipo|mi\s+club|f[uú]tbol|futbol|deporte|liga|team|sport)\b/i, intent: 'sportsQuery', weight: 15, description: 'news about my team/sport' },
-  { pattern: /\b(mi\s+equipo|mi\s+club)\b.*\bnoticias?\b/i, intent: 'sportsQuery', weight: 15, description: 'my team news' },
+  // "noticias de mi equipo / club / deporte" → webSearch (needs real articles)
+  { pattern: /\bnoticias?\b.*\b(mi\s+equipo|mi\s+club|f[uú]tbol|futbol|deporte|liga|team|sport)\b/i, intent: 'webSearch', weight: 15, description: 'news about my team/sport' },
+  { pattern: /\b(mi\s+equipo|mi\s+club)\b.*\bnoticias?\b/i, intent: 'webSearch', weight: 15, description: 'my team news' },
+  // club business events (transfers, ownership, signings) → always webSearch
+  { pattern: /\b(venta|compra|vende|compra|vendido|comprado|adquiri[oó]|adquisici[oó]n)\b.*\b(equipo|club|equipo|atlas|chivas|tigres|pumas|america|monterrey|cruz\s*azul|pachuca|toluca|santos|leon|guadalajara)\b/i, intent: 'webSearch', weight: 18, description: 'club sale/acquisition' },
+  { pattern: /\b(equipo|club|atlas|chivas|tigres|pumas|america|monterrey|cruz\s*azul|pachuca|toluca|santos|leon|guadalajara)\b.*\b(venta|compra|vendido|comprado|adquiri[oó]|adquisici[oó]n|dueño|propietario|inversi[oó]n)\b/i, intent: 'webSearch', weight: 18, description: 'club ownership/acquisition' },
+  { pattern: /\b(fichaje|fichajes|transfer(encia)?|contrat[oó]|renovaci[oó]n|refuerzo|refuerzos|alta|baja)\b/i, intent: 'webSearch', weight: 14, description: 'transfers/contracts' },
+  { pattern: /\b(dueño|propietario|directivo|presidente|director\s+deportivo|inversionista)\b.*\b(equipo|club|f[uú]tbol|futbol)\b/i, intent: 'webSearch', weight: 14, description: 'club ownership/executive' },
   // "cómo va / cómo está mi equipo"
   { pattern: /\b(c[oó]mo\s+(va|est[aá]|le\s+fue|qued[oó]))\b.*\bmi\s+(equipo|club)\b/i, intent: 'sportsQuery', weight: 12, description: 'how is my team doing' },
   { pattern: /\bmi\s+(equipo|club)\b.*\b(c[oó]mo\s+(va|est[aá]|le\s+fue|qued[oó]))\b/i, intent: 'sportsQuery', weight: 12, description: 'my team how is it doing' },
@@ -136,7 +141,8 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(hoy|today|ahora|now|actual|current|últim[oa]s?|latest|reciente|recent|este año|this year|esta semana|this week|ayer|yesterday)(?:\s|$|[?,.])/i, intent: 'webSearch', weight: 3, description: 'recency indicator' },
 ]
 
-// Dynamic signal: "noticias" + known sports alias (from DB) → sportsQuery weight 18
+// Dynamic signal: "noticias" + known sports alias (from DB) → webSearch weight 18
+// News about a specific team needs real web articles, not ESPN scoreboard.
 // Built lazily on first use — DB may not be initialized at module load time.
 let _teamNewsSignal: Signal | null = null
 function getTeamNewsSignal(): Signal {
@@ -145,9 +151,9 @@ function getTeamNewsSignal(): Signal {
   const escaped = aliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
   _teamNewsSignal = {
     pattern: new RegExp(`(?:noticias?|news).*\\b(${escaped})\\b|\\b(${escaped})\\b.*(?:noticias?|news)`, 'i'),
-    intent: 'sportsQuery',
+    intent: 'webSearch',
     weight: 18,
-    description: 'news about known sports alias (DB)',
+    description: 'news about known sports alias (DB) → webSearch',
   }
   return _teamNewsSignal
 }
