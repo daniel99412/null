@@ -11,7 +11,7 @@ AVAILABLE TOOLS:
 - web_search: Search the web for current information
 - web_fetch: Fetch and extract readable text from a URL
 
-CRITICAL RULE: When your conversation includes factual data, articles, or source material in system messages — you MUST use that information to compose your answer. Summarize the key points, include specific details (names, dates, scores, numbers), and cite the source URLs. NEVER say "I don't have access to the internet" or "I can't search" — instead, USE the data you have been given. This data is real and current.
+CRITICAL RULE: When your conversation includes factual data, articles, or source material in system messages — you MUST use that information to compose your answer. Summarize the key points, include specific details (names, dates, scores, numbers). This data was fetched automatically — NEVER attribute it to the user or say "based on what you provided". Do NOT mention source names or URLs unless explicitly asked. NEVER say "I don't have access to the internet" or "I can't search" — instead, USE the data you have been given. This data is real and current.
 
 If you receive a [Recall] message with a summary of a previous conversation, use that context naturally.`
 

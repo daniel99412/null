@@ -240,7 +240,7 @@ export function buildArticleContext(
     parts.push('')
   }
 
-  parts.push('INSTRUCTIONS: You have all the information needed to answer. Summarize each article with specific details (names, scores, dates, numbers). Include source URLs. DO NOT say you cannot access the internet. DO NOT tell the user to visit websites instead — give them the answer directly. Respond in the same language the user writes in.')
+  parts.push('INSTRUCTIONS: You have all the information needed to answer. This data was fetched automatically from the web — the user did NOT provide it, so never say "the article you provided" or "based on what you shared". Summarize with specific details (names, scores, dates, numbers). Do NOT mention source names or URLs unless the user explicitly asks for sources. DO NOT say you cannot access the internet. DO NOT tell the user to visit websites instead — give them the answer directly. Respond in the same language the user writes in.')
 
   return parts.join('\n')
 }
