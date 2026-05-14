@@ -1049,10 +1049,29 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   let news: ESPNNewsArticle[] | undefined = getCachedNews(newsKey) ?? undefined
   if (!news) {
     try {
-      debugLog(`[espn] fetching news: ${focusTeam?.id ? `team ${focusTeam.id}` : `league ${leagueSlug}`}`)
-      news = focusTeam?.id
-        ? await getTeamNews(leagueSlug, focusTeam.id, 5)
-        : await getLeagueNews(leagueSlug, 5)
+      if (focusTeam?.id) {
+        debugLog(`[espn] fetching team news: ${focusTeam.id}`)
+        const teamNews = await getTeamNews(leagueSlug, focusTeam.id, 5)
+        if (teamNews.length > 0) {
+          news = teamNews
+        } else {
+          // Team news endpoint returned empty (common for Liga MX) — fall back to
+          // league news and filter articles that mention the team by name
+          debugLog(`[espn] team news empty — falling back to league news filtered by team`)
+          const leagueNews = await getLeagueNews(leagueSlug, 20)
+          const teamNameLower = focusTeam.name.toLowerCase()
+          const filtered = leagueNews.filter((a) =>
+            a.headline.toLowerCase().includes(teamNameLower) ||
+            (a.description ?? '').toLowerCase().includes(teamNameLower) ||
+            a.categories.some((c) => c.toLowerCase().includes(teamNameLower))
+          )
+          news = filtered.length > 0 ? filtered.slice(0, 5) : leagueNews.slice(0, 5)
+          debugLog(`[espn] filtered league news: ${filtered.length} matching articles (showing ${news.length})`)
+        }
+      } else {
+        debugLog(`[espn] fetching league news: ${leagueSlug}`)
+        news = await getLeagueNews(leagueSlug, 5)
+      }
       debugLog(`[espn] news: ${news.length} articles`)
       setCachedNews(newsKey, news)
     } catch (err) {
