@@ -1,5 +1,6 @@
 import { getRouterClient } from '../core/llm-client.js'
 import { upsertMemories, type MemoryType, type UpsertMemoryOptions } from './memory-store.js'
+import { debugLog } from '../utils/debug.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ export async function extractMemoriesFromMessage(
 ): Promise<ExtractedMemory[]> {
   try {
     const client = getRouterClient() // qwen2.5:3b
+    debugLog(`[memory-extractor] extracting from: "${message.slice(0, 60)}" hints=[${hints.join(',')}]`)
 
     const hintNote = hints.length > 0
       ? `\n\nFocus especially on: ${hints.join(', ')}.`
@@ -123,12 +125,18 @@ export async function extractMemoriesFromMessage(
       { role: 'user', content: message + hintNote },
     ])
 
+    debugLog(`[memory-extractor] LLM raw: ${response.trim().slice(0, 100)}`)
     const extracted = parseExtractorResponse(response)
 
     // Filter out low-confidence items
     const confident = extracted.filter((e) => e.confidence >= 0.6)
 
-    if (confident.length === 0) return []
+    if (confident.length === 0) {
+      debugLog(`[memory-extractor] no confident extractions`)
+      return []
+    }
+
+    debugLog(`[memory-extractor] extracted ${confident.length} memories: ${confident.map(e => `${e.type}=${e.value}`).join(', ')}`)
 
     // Persist to DB
     const toUpsert: UpsertMemoryOptions[] = confident.map((e) => ({
@@ -143,7 +151,8 @@ export async function extractMemoriesFromMessage(
     upsertMemories(toUpsert)
 
     return confident
-  } catch {
+  } catch (err) {
+    debugLog(`[memory-extractor] error: ${err instanceof Error ? err.message : String(err)}`)
     // Extractor failure must never crash the main flow
     return []
   }

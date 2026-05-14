@@ -1,5 +1,6 @@
 import { normalizeQuery } from '../utils/normalize.js'
 import { getRouterClient } from './llm-client.js'
+import { debugLog } from '../utils/debug.js'
 
 const ROUTER_SYSTEM_PROMPT = `You are a strict tool router.
 Your job is to classify the user query into exactly one of three options.
@@ -147,6 +148,7 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
   for (const signal of SIGNALS) {
     if (signal.pattern.test(query)) {
       scores[signal.intent] += signal.weight
+      debugLog(`[router] signal match: "${signal.description}" → ${signal.intent} +${signal.weight}`)
     }
   }
 
@@ -190,12 +192,14 @@ async function chat(messages: { role: string; content: string }[], systemPrompt:
 
 export async function routeQuery(query: string): Promise<RouterResult> {
   const normalizedQuery = normalizeQuery(query)
+  debugLog(`[router] query: "${normalizedQuery}"`)
   const scores = scoreQuery(normalizedQuery)
   const { decision, confidence, scores: debugScores } = topDecision(scores)
 
   // Log scores in debug mode
   if (process.env['NULL_DEBUG']) {
-    process.stderr.write(`[router] scores: ${JSON.stringify(debugScores)}\n`)
+    process.stderr.write(`[null-debug] [router] scores: ${JSON.stringify(debugScores)}\n`)
+    process.stderr.write(`[null-debug] [router] top decision: ${decision} (confidence: ${confidence})\n`)
   }
 
   // If score is high enough, use heuristic directly
@@ -203,26 +207,34 @@ export async function routeQuery(query: string): Promise<RouterResult> {
     // For 'none' decisions with recency signals: don't force none if web is close
     if (decision === 'none' && scores.webSearch >= 3) {
       // Recency indicator present even with a "knowledge" match — search is safer
+      debugLog(`[router] none+recency → overriding to webSearch`)
       return { decision: 'webSearch', confidence: 0.7, source: 'heuristic' }
     }
+    debugLog(`[router] heuristic result: ${decision}`)
     return { decision, confidence, source: 'heuristic' }
   }
 
   // Low-confidence score: fall back to LLM
+  debugLog(`[router] low confidence — falling back to LLM router`)
   try {
     const llmResponse = await chat(
       [{ role: 'user', content: normalizedQuery }],
       ROUTER_SYSTEM_PROMPT,
     )
+    debugLog(`[router] LLM raw response: ${llmResponse.trim()}`)
     const parsed = JSON.parse(llmResponse) as { tool: RoutingDecision; confidence: number }
     if (['webSearch', 'getDateTime', 'getWeather', 'sportsQuery', 'savePreference', 'none'].includes(parsed.tool)) {
       if (parsed.tool === 'none' && parsed.confidence < 0.7) {
+        debugLog(`[router] LLM said none low-confidence → webSearch`)
         return { decision: 'webSearch', confidence: parsed.confidence, source: 'llm' }
       }
+      debugLog(`[router] LLM result: ${parsed.tool} (confidence: ${parsed.confidence})`)
       return { decision: parsed.tool, confidence: parsed.confidence, source: 'llm' }
     }
+    debugLog(`[router] LLM returned unknown tool — defaulting to webSearch`)
     return { decision: 'webSearch', confidence: 0.5, source: 'llm' }
-  } catch {
+  } catch (err) {
+    debugLog(`[router] LLM parse failed: ${err instanceof Error ? err.message : String(err)} — defaulting to webSearch`)
     return { decision: 'webSearch', confidence: 0, source: 'llm' }
   }
 }

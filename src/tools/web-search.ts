@@ -10,6 +10,8 @@ export interface SearchContext {
   extract: string | null
 }
 
+import { debugLog } from '../utils/debug.js'
+
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 /**
@@ -17,6 +19,7 @@ const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
  * No API key required — parses the lightweight HTML endpoint.
  */
 export async function searchWeb(query: string, limit: number = 5): Promise<SearchResult[]> {
+  debugLog(`[web-search] query: "${query}" (limit: ${limit})`)
   const params = new URLSearchParams({ q: query })
 
   const res = await fetch(`https://html.duckduckgo.com/html/?${params}`, {
@@ -24,6 +27,7 @@ export async function searchWeb(query: string, limit: number = 5): Promise<Searc
   })
 
   if (!res.ok) {
+    debugLog(`[web-search] DuckDuckGo returned ${res.status}`)
     throw new Error(`DuckDuckGo search failed: ${res.status}`)
   }
 
@@ -34,7 +38,9 @@ export async function searchWeb(query: string, limit: number = 5): Promise<Searc
     throw new Error('DuckDuckGo rate-limited this request — try again shortly')
   }
 
-  return parseDDGResults(html, limit)
+  const parsed = parseDDGResults(html, limit)
+  debugLog(`[web-search] got ${parsed.length} results: ${parsed.map(r => r.title.slice(0,30)).join(' | ')}`)
+  return parsed
 }
 
 /**

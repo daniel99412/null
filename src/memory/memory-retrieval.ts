@@ -1,4 +1,5 @@
 import { getMemoriesByType, searchMemories, hasAnyMemories, type MemoryType, type MemoryWithScore } from './memory-store.js'
+import { debugLog } from '../utils/debug.js'
 
 // ── Query profiles ────────────────────────────────────────────────────────────
 //
@@ -100,7 +101,11 @@ export function buildMemoryContext(
   keywords: string[] = [],
 ): string | null {
   const memories = retrieveMemories(profile, keywords)
-  if (memories.length === 0) return null
+  if (memories.length === 0) {
+    debugLog(`[memory-retrieval] buildMemoryContext(${profile}): no memories found`)
+    return null
+  }
+  debugLog(`[memory-retrieval] buildMemoryContext(${profile}): ${memories.length} memories retrieved`)
 
   // Group by type
   const groups = new Map<string, string[]>()

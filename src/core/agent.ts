@@ -47,11 +47,9 @@ interface SearchPipelineResult {
   originalTxt: string
 }
 
-// ─── Debug ────────────────────────────────────────────────────────────────────
+import { debugLog } from '../utils/debug.js'
 
-export function debugLog(msg: string): void {
-  process.stderr.write(`[null-debug] ${msg}\n`)
-}
+export { debugLog }
 
 // ─── Weather helpers ──────────────────────────────────────────────────────────
 
@@ -397,8 +395,42 @@ export async function processQuery(
         scoreboard: sportsResult.scoreboard,
       }
     }
-    // League not recognized — fall back to web search
-    const result = await performSearch(query, query)
+
+    // buildSportsContext returned null — league not detected in query.
+    // Check memory: if user has a saved team/league, retry with that context.
+    const memCtx = buildSportsMemoryContext()
+    if (memCtx) {
+      debugLog(`ESPN league not detected in query — retrying with memory context: ${memCtx.slice(0, 80)}`)
+      // Extract team/league values from memory context and append to query
+      // e.g. "[User context]\n- preference: atlas, liga mx" → "atlas liga mx"
+      const memValues = memCtx
+        .split('\n')
+        .filter((l) => l.startsWith('- '))
+        .map((l) => l.replace(/^- \w+:\s*/, ''))
+        .join(' ')
+      const enrichedQuery = `${query} ${memValues}`
+      debugLog(`enriched query: "${enrichedQuery}"`)
+      const retryResult = await buildSportsContext(enrichedQuery)
+      if (retryResult) {
+        const llmContext = `${memCtx}\n\n${retryResult.llmContext}`
+        return {
+          userContent: query,
+          searchContext: llmContext,
+          statusMessage: 'Consultando resultados deportivos...',
+          tableOutput: retryResult.tableOutput,
+          seasonPhase: retryResult.seasonPhase,
+          scoreboard: retryResult.scoreboard,
+        }
+      }
+      debugLog(`ESPN retry also failed — falling back to webSearch with enriched query`)
+    }
+
+    // League not recognized even after memory enrichment — fall back to web search
+    // Use enriched query if we have memory to avoid "Microsoft Teams" type confusion
+    const searchQuery = memCtx
+      ? `${query} ${memCtx.split('\n').filter(l => l.startsWith('- ')).map(l => l.replace(/^- \w+:\s*/, '')).join(' ')}`
+      : query
+    const result = await performSearch(searchQuery, query)
     return {
       userContent: query,
       searchContext: result?.contextMessage ?? null,

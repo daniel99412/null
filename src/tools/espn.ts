@@ -6,6 +6,8 @@
  * Cache is handled in espn-cache.ts and integrated in buildSportsContext.
  */
 
+import { debugLog } from '../utils/debug.js'
+
 import {
   buildCacheKey,
   buildNewsCacheKey,
@@ -309,11 +311,18 @@ const TEAM_ID_MAP: Record<string, string> = {
 export function detectLeague(query: string): string | null {
   const q = query.toLowerCase()
   for (const [keyword, slug] of Object.entries(LEAGUE_MAP)) {
-    if (q.includes(keyword)) return slug
+    if (q.includes(keyword)) {
+      debugLog(`[espn] detectLeague: "${keyword}" → ${slug}`)
+      return slug
+    }
   }
   for (const [team, slug] of Object.entries(TEAM_LEAGUE_MAP)) {
-    if (q.includes(team)) return slug
+    if (q.includes(team)) {
+      debugLog(`[espn] detectLeague via team: "${team}" → ${slug}`)
+      return slug
+    }
   }
+  debugLog(`[espn] detectLeague: no match for query "${q}"`)
   return null
 }
 
@@ -322,9 +331,11 @@ export function detectTeam(query: string): { name: string; id?: string; leagueSl
   for (const [teamName, leagueSlug] of Object.entries(TEAM_LEAGUE_MAP)) {
     if (q.includes(teamName)) {
       const id = TEAM_ID_MAP[teamName]
+      debugLog(`[espn] detectTeam: "${teamName}" in ${leagueSlug} (id: ${id ?? 'unknown'})`)
       return { name: teamName, id, leagueSlug }
     }
   }
+  debugLog(`[espn] detectTeam: no team match for query "${q}"`)
   return null
 }
 
@@ -1132,12 +1143,17 @@ export interface SportsQueryOutput {
 
 export async function buildSportsContext(query: string): Promise<SportsQueryOutput | null> {
   const leagueSlug = detectLeague(query)
-  if (!leagueSlug) return null
+  if (!leagueSlug) {
+    debugLog(`[espn] buildSportsContext: no league detected — returning null`)
+    return null
+  }
 
   const focusTeam = detectTeam(query)
   const intent = detectDateIntent(query)
   const hasExplicit = hasExplicitDateRange(query)
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  debugLog(`[espn] buildSportsContext: league=${leagueSlug} team=${focusTeam?.name ?? 'none'} intent=${intent} hasExplicit=${hasExplicit}`)
 
   // --- Resolve scoreboard date range ---
   let scoreboardRange: DateRange
@@ -1152,9 +1168,15 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   let scoreboard: ESPNScoreboard | undefined = getCachedScoreboard(scoreboardKey) ?? undefined
   if (!scoreboard) {
     try {
+      debugLog(`[espn] fetching scoreboard: ${leagueSlug} ${scoreboardRange.from.toISOString().slice(0,10)} – ${scoreboardRange.to.toISOString().slice(0,10)}`)
       scoreboard = await getScoreboard(leagueSlug, scoreboardRange)
+      debugLog(`[espn] scoreboard: ${scoreboard.games.length} games`)
       setCachedScoreboard(scoreboardKey, scoreboard)
-    } catch { /* scoreboard unavailable */ }
+    } catch (err) {
+      debugLog(`[espn] scoreboard fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  } else {
+    debugLog(`[espn] scoreboard cache hit`)
   }
 
   // --- Cached news fetch ---
@@ -1162,11 +1184,17 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   let news: ESPNNewsArticle[] | undefined = getCachedNews(newsKey) ?? undefined
   if (!news) {
     try {
+      debugLog(`[espn] fetching news: ${focusTeam?.id ? `team ${focusTeam.id}` : `league ${leagueSlug}`}`)
       news = focusTeam?.id
         ? await getTeamNews(leagueSlug, focusTeam.id, 5)
         : await getLeagueNews(leagueSlug, 5)
+      debugLog(`[espn] news: ${news.length} articles`)
       setCachedNews(newsKey, news)
-    } catch { /* news unavailable */ }
+    } catch (err) {
+      debugLog(`[espn] news fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  } else {
+    debugLog(`[espn] news cache hit`)
   }
 
   // --- Cached standings fetch ---
@@ -1174,9 +1202,15 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   let standings: ESPNStandings | undefined = getCachedStandings(standingsKey) ?? undefined
   if (!standings) {
     try {
+      debugLog(`[espn] fetching standings: ${leagueSlug}`)
       standings = await getStandings(leagueSlug)
+      debugLog(`[espn] standings: ${standings.groups.length} groups`)
       setCachedStandings(standingsKey, standings)
-    } catch { /* standings unavailable */ }
+    } catch (err) {
+      debugLog(`[espn] standings fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  } else {
+    debugLog(`[espn] standings cache hit`)
   }
 
   // --- Optionally fetch game summaries for recent finals (max 2, only if team focused) ---

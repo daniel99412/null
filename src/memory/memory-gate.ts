@@ -8,6 +8,8 @@
 // The router handles explicit "save this preference" intents (sports teams, leagues).
 // The gate handles broader personal info that should be stored silently.
 
+import { debugLog } from '../utils/debug.js'
+
 // ── Signals ───────────────────────────────────────────────────────────────────
 
 // Each signal maps to a MemoryType category so the extractor knows what to focus on.
@@ -65,6 +67,7 @@ export function checkMemoryGate(message: string): GateResult {
 
   // Fast rejections
   if (trimmed.length < MIN_LENGTH || trimmed.length > MAX_LENGTH) {
+    debugLog(`[memory-gate] skip: length ${trimmed.length} out of range`)
     return { shouldExtract: false, hints: [] }
   }
 
@@ -72,11 +75,13 @@ export function checkMemoryGate(message: string): GateResult {
   const isQuestion = /^\s*(que|qué|como|cómo|cuando|cuándo|donde|dónde|quien|quién|cual|cuál|cuanto|cuánto|what|how|when|where|who|which|why|can you|could you|do you|is there|are there)\b/i.test(trimmed)
     || trimmed.endsWith('?')
   if (isQuestion) {
+    debugLog(`[memory-gate] skip: question detected`)
     return { shouldExtract: false, hints: [] }
   }
 
   // Skip slash commands
   if (trimmed.startsWith('/')) {
+    debugLog(`[memory-gate] skip: slash command`)
     return { shouldExtract: false, hints: [] }
   }
 
@@ -89,8 +94,10 @@ export function checkMemoryGate(message: string): GateResult {
   }
 
   if (hints.size === 0) {
+    debugLog(`[memory-gate] skip: no signal matched`)
     return { shouldExtract: false, hints: [] }
   }
 
+  debugLog(`[memory-gate] PASS: hints=[${[...hints].join(', ')}]`)
   return { shouldExtract: true, hints: Array.from(hints) }
 }
