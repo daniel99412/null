@@ -1,4 +1,6 @@
 import { getDb } from './database.js'
+import { upsertMemory } from './memory-store.js'
+import { buildSportsMemoryContext } from './memory-retrieval.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -168,9 +170,19 @@ export function extractPreferencesFromQuery(query: string): ExtractedPreference[
 
 export function addPreference(category: PreferenceCategory, value: string, label: string): void {
   const db = getDb()
+  // Keep writing to legacy table for backward compatibility
   db.prepare(
     'INSERT OR IGNORE INTO user_preferences (category, value, label) VALUES (?, ?, ?)',
   ).run(category, value, label)
+
+  // Also upsert into the new memory system
+  upsertMemory({
+    type: 'preference',
+    value,
+    rawValue: label,
+    confidence: 0.9,
+    source: 'explicit',
+  })
 }
 
 export function removePreference(category: PreferenceCategory, value: string): void {
@@ -205,18 +217,10 @@ export function hasAnyPreferences(): boolean {
 
 /**
  * Build a human-readable summary of stored preferences for LLM context injection.
+ * Delegates to the new memory retrieval system (sports profile).
  */
 export function buildPreferencesContext(): string | null {
-  if (!hasAnyPreferences()) return null
-  const byCategory = getPreferencesByCategory()
-  const lines: string[] = ['[Preferencias del usuario:']
-  if (byCategory.team.length > 0) lines.push(`  Equipos favoritos: ${byCategory.team.join(', ')}`)
-  if (byCategory.league.length > 0) lines.push(`  Ligas favoritas: ${byCategory.league.join(', ')}`)
-  if (byCategory.sport.length > 0) lines.push(`  Deportes favoritos: ${byCategory.sport.join(', ')}`)
-  if (byCategory.player.length > 0) lines.push(`  Jugadores favoritos: ${byCategory.player.join(', ')}`)
-  if (byCategory.other.length > 0) lines.push(`  Otros: ${byCategory.other.join(', ')}`)
-  lines.push(']')
-  return lines.join('\n')
+  return buildSportsMemoryContext()
 }
 
 /**

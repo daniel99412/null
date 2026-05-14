@@ -9,8 +9,10 @@ import {
   extractPreferencesFromQuery,
   addPreference,
   buildPreferenceSavedMessage,
-  buildPreferencesContext,
 } from '../memory/preferences.js'
+import { checkMemoryGate } from '../memory/memory-gate.js'
+import { extractMemoriesFromMessage } from '../memory/memory-extractor.js'
+import { buildSportsMemoryContext, buildGeneralMemoryContext } from '../memory/memory-retrieval.js'
 import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/weather.js'
 import { getDefaultClient } from './llm-client.js'
 import type { ToolAction } from './toolAction.js'
@@ -316,6 +318,16 @@ export async function processQuery(
   const { decision } = routerResult
   debugLog(`Router decision: ${decision} (source: ${routerResult.source}, confidence: ${routerResult.confidence})`)
 
+  // ── Background memory extraction ──────────────────────────────────────────
+  // Fire-and-forget: check gate first (free), then run LLM extractor only if
+  // gate passes. Never awaited — must not block or throw into the main flow.
+  if (decision !== 'savePreference') {
+    const gateResult = checkMemoryGate(query)
+    if (gateResult.shouldExtract) {
+      extractMemoriesFromMessage(query, gateResult.hints).catch(() => {/* silent */})
+    }
+  }
+
   if (decision === 'getDateTime') {
     const t = tools.get_time()
     return {
@@ -371,9 +383,14 @@ export async function processQuery(
     onStatus?.('Consultando resultados deportivos...')
     const sportsResult = await buildSportsContext(query)
     if (sportsResult) {
+      // Inject sports memory context (teams/leagues/sports) into the LLM context
+      const memCtx = buildSportsMemoryContext()
+      const llmContext = memCtx
+        ? `${memCtx}\n\n${sportsResult.llmContext}`
+        : sportsResult.llmContext
       return {
         userContent: query,
-        searchContext: sportsResult.llmContext,
+        searchContext: llmContext,
         statusMessage: 'Consultando resultados deportivos...',
         tableOutput: sportsResult.tableOutput,
         seasonPhase: sportsResult.seasonPhase,
