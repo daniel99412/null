@@ -5,6 +5,9 @@ import os from 'os'
 const CONFIG_DIR = path.join(os.homedir(), '.null-cli')
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
 
+export const DEFAULT_MODEL = 'qwen2.5-coder:7b'
+export const ROUTER_MODEL = 'qwen2.5:3b'
+
 export const AVAILABLE_COLORS = [
   'cyan',
   'green',
@@ -32,6 +35,7 @@ export interface NullConfig {
   accentColor: AccentColor
   openWeatherApiKey?: string
   cachedLocation?: CachedLocation
+  model?: string
 }
 
 const DEFAULT_CONFIG: NullConfig = {
@@ -51,6 +55,7 @@ export function loadConfig(): NullConfig {
         : DEFAULT_CONFIG.accentColor,
       openWeatherApiKey: parsed.openWeatherApiKey,
       cachedLocation: parsed.cachedLocation,
+      model: parsed.model,
     }
   } catch {
     return { ...DEFAULT_CONFIG }
@@ -67,5 +72,11 @@ export function saveConfig(config: NullConfig): void {
 export function setAccentColor(color: AccentColor): void {
   const config = loadConfig()
   config.accentColor = color
+  saveConfig(config)
+}
+
+export function setModel(model: string): void {
+  const config = loadConfig()
+  config.model = model
   saveConfig(config)
 }

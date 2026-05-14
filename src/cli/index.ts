@@ -2,7 +2,9 @@ import { Command } from 'commander'
 import { runTUI } from '../tui/App.js'
 import { streamChat } from '../core/ollama.js'
 import { renderMarkdown } from '../utils/markdown.js'
-import { loadConfig, setAccentColor, saveConfig, type AccentColor } from '../config/index.js'
+import { loadConfig, setAccentColor, saveConfig, setModel, type AccentColor } from '../config/index.js'
+import { checkHealth } from '../core/health.js'
+import { runSetup } from './setup.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -41,7 +43,7 @@ export function runCLI(): void {
   configCmd
     .command('set')
     .description('Set a configuration value')
-    .argument('<key>', 'config key (accent-color, weather-key)')
+    .argument('<key>', 'config key (accent-color, weather-key, model)')
     .argument('<value>', 'value')
     .action((key: string, value: string) => {
       if (key === 'accent-color') {
@@ -57,17 +59,59 @@ export function runCLI(): void {
         }
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
         console.log('OpenWeather API key saved')
+      } else if (key === 'model') {
+        setModel(value)
+        console.log(`Model set to: ${value}`)
       } else {
-        console.error(`Unknown key: ${key}. Valid keys: accent-color, weather-key`)
+        console.error(`Unknown key: ${key}. Valid keys: accent-color, weather-key, model`)
         process.exit(1)
       }
+    })
+
+  // Health check command
+  program
+    .command('health')
+    .description('Check status of Ollama and internet connectivity')
+    .action(async () => {
+      process.stdout.write('Checking services...\n')
+      const status = await checkHealth(3000)
+
+      const ollamaIcon = status.ollama.available ? '✓' : '✗'
+      const internetIcon = status.internet.available ? '✓' : '✗'
+
+      console.log(`\nOllama        ${ollamaIcon} ${status.ollama.available ? `online (${status.ollama.latencyMs}ms)` : 'offline — run: ollama serve'}`)
+      if (status.ollama.available && status.ollama.models.length > 0) {
+        console.log(`  Models: ${status.ollama.models.join(', ')}`)
+      }
+      console.log(`Internet      ${internetIcon} ${status.internet.available ? 'connected' : 'no connection — web search unavailable'}`)
+    })
+
+  // Setup wizard
+  program
+    .command('setup')
+    .description('Interactive setup wizard')
+    .action(async () => {
+      await runSetup()
     })
 
   program
     .argument('[prompt...]', 'prompt to execute directly')
     .option('--dev', 'enable debug mode')
     .option('-s, --session <id>', 'resume a previous session')
-    .action((promptParts: string[], options: CLIOptions) => {
+    .action(async (promptParts: string[], options: CLIOptions) => {
+      // Fast startup check — fail early if Ollama is not running
+      const health = await checkHealth(2000)
+      if (!health.ollama.available) {
+        console.error('\x1B[31mError:\x1B[0m Ollama is not running.')
+        console.error('Start it with: \x1B[36mollama serve\x1B[0m')
+        console.error('Or check status with: \x1B[36mnull health\x1B[0m')
+        process.exit(1)
+      }
+
+      if (!health.internet.available) {
+        process.stderr.write('\x1B[33mWarning:\x1B[0m No internet connection — web search will be unavailable.\n')
+      }
+
       if (!promptParts || promptParts.length === 0) {
         runTUI(options.session)
         return

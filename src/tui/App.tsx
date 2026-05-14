@@ -1,7 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { streamChat } from '../core/ollama.js'
-import { tools } from '../core/tools.js'
 import { useLoading } from './hooks/useLoading.js'
 import { useCursor } from './hooks/useCursor.js'
 import { Splash } from './components/Splash.js'
@@ -15,7 +14,7 @@ import { CommandPalette } from './components/CommandPalette.js'
 import type { CommandItem } from './components/CommandPalette.js'
 import { SessionList } from './components/SessionList.js'
 import { ColorPicker } from './components/ColorPicker.js'
-import { ThemeProvider, useTheme } from './context/ThemeContext.js'
+import { ThemeProvider } from './context/ThemeContext.js'
 import {
   createSession,
   getSession,
@@ -28,42 +27,10 @@ import {
 } from '../memory/sessions.js'
 import type { Session } from '../memory/sessions.js'
 import { runCleanup } from '../memory/cleanup.js'
-import { routeQuery } from '../core/router.js'
-import { getCachedSearch, setCachedSearch } from '../memory/search-cache.js'
-import type { SearchContext } from '../tools/web-search.js'
-import { getScoreboard, detectLeague, detectDateRange, detectDateIntent, hasExplicitDateRange, getLastMatchdayRange, formatScoreboardContext } from '../tools/espn.js'
-import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/weather.js'
+import { loadConfig, DEFAULT_MODEL } from '../config/index.js'
+import { processQuery, processQueryWithReAct } from '../core/agent.js'
 
-/**
- * Extract city name from a weather query using simple regex patterns.
- * Returns null if no city is mentioned (use IP geolocation instead).
- * Examples:
- *   "clima en Cancún"         → "Cancún"
- *   "cómo está el clima en Tokyo" → "Tokyo"
- *   "qué clima hace"          → null
- */
-function extractCityFromQuery(query: string): string | null {
-  const patterns = [
-    /(?:clima|tiempo|temperatura|weather)\s+(?:en|de|para|in)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)(?:\?|$|,|\s+hoy|\s+ahorita|\s+ahora)/i,
-    /(?:en|de|para|in)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)\s+(?:clima|tiempo|temperatura|weather)/i,
-    /(?:hace\s+(?:calor|frío|frio)\s+en)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)(?:\?|$|,)/i,
-    /(?:va\s+a\s+llover\s+en)\s+([A-Za-záéíóúüñÁÉÍÓÚÜÑ\s]+?)(?:\?|$|,)/i,
-  ]
-
-  for (const pattern of patterns) {
-    const match = query.match(pattern)
-    if (match) {
-      const city = match[1].trim()
-      // sanity check: ignore very short or generic matches
-      if (city.length >= 3 && !/^(hoy|ahora|aqui|aquí|mi|la|el)$/i.test(city)) {
-        return city
-      }
-    }
-  }
-  return null
-}
-
-const MODEL = 'qwen2.5-coder:7b'
+const MODEL = loadConfig().model ?? DEFAULT_MODEL
 
 const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
@@ -75,221 +42,6 @@ const COMMANDS: CommandItem[] = [
 ]
 
 type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker'
-
-interface SearchPipelineResult {
-  contextMessage: string
-  originalTxt: string
-}
-
-interface FetchedArticle {
-  title: string
-  url: string
-  content: string
-}
-
-/**
- * Debug log to stderr (doesn't interfere with TUI).
- */
-function debugLog(msg: string): void {
-  process.stderr.write(`[null-debug] ${msg}\n`)
-}
-
-/**
- * Fetch multiple pages in parallel, returning structured articles.
- */
-async function fetchArticles(
-  results: { title: string; url: string; snippet: string }[],
-  maxArticles: number = 5,
-): Promise<FetchedArticle[]> {
-  const toFetch = results.slice(0, maxArticles)
-
-  const settled = await Promise.allSettled(
-    toFetch.map(async (r) => {
-      const text = await tools.web_fetch(r.url)
-      return {
-        title: r.title,
-        url: r.url,
-        content: text && text.length > 100 ? text : r.snippet,
-      }
-    }),
-  )
-
-  const articles: FetchedArticle[] = []
-  for (let i = 0; i < settled.length; i++) {
-    const result = settled[i]
-    if (result.status === 'fulfilled') {
-      articles.push(result.value)
-      debugLog(`  ✓ Fetched: ${toFetch[i].title}`)
-    } else {
-      // Use snippet as fallback
-      articles.push({
-        title: toFetch[i].title,
-        url: toFetch[i].url,
-        content: toFetch[i].snippet,
-      })
-      debugLog(`  ✗ Failed, using snippet: ${toFetch[i].title}`)
-    }
-  }
-
-  return articles
-}
-
-/**
- * Build a factual context message from fetched articles.
- * Structured as a numbered dictionary so the LLM can summarize each one.
- */
-function buildArticleContext(
-  articles: FetchedArticle[],
-  query: string,
-  wikiExtract?: string | null,
-): string {
-  const now = new Date()
-  const systemLocale = Intl.DateTimeFormat().resolvedOptions()
-  const todayStr = now.toLocaleDateString(systemLocale.locale, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    timeZone: systemLocale.timeZone,
-  })
-
-  const parts = [
-    `Today is ${todayStr}.`,
-    `The following are ${articles.length} current articles/sources about "${query}".`,
-    `Read each one and use the information to answer the user's question.`,
-    '',
-  ]
-
-  if (wikiExtract) {
-    parts.push('--- Background ---')
-    parts.push(wikiExtract)
-    parts.push('')
-  }
-
-  for (let i = 0; i < articles.length; i++) {
-    const a = articles[i]
-    parts.push(`--- Article ${i + 1}: ${a.title} ---`)
-    parts.push(`Source: ${a.url}`)
-    // Truncate each article to ~3000 chars to fit context window
-    parts.push(a.content.slice(0, 3000))
-    parts.push('')
-  }
-
-  parts.push('INSTRUCTIONS: You have all the information needed to answer. Summarize each article with specific details (names, scores, dates, numbers). Include source URLs. DO NOT say you cannot access the internet. DO NOT tell the user to visit websites instead — give them the answer directly. Respond in the same language the user writes in.')
-
-  return parts.join('\n')
-}
-
-/**
- * Full search pipeline: search DDG → fetch top 5 pages → build structured context.
- * Uses cache to avoid redundant calls.
- * Returns null if search fails or yields no results.
- */
-async function performSearch(query: string, originalTxt: string): Promise<SearchPipelineResult | null> {
-  try {
-    debugLog(`Router triggered webSearch for: "${query}"`)
-
-    // Check cache first
-    const cached = getCachedSearch(query)
-    let searchCtx: SearchContext
-
-    if (cached) {
-      debugLog('Using cached search results')
-      searchCtx = cached
-    } else {
-      // Fetch from DuckDuckGo
-      searchCtx = await tools.web_search(query)
-      debugLog(`DDG returned ${searchCtx.results.length} results, extract: ${searchCtx.extract ? 'yes' : 'no'}`)
-
-      if (searchCtx.results.length === 0 && !searchCtx.extract) {
-        debugLog('No search results found')
-        return null
-      }
-
-      // Cache the result (5 min TTL)
-      setCachedSearch(query, searchCtx, 300)
-    }
-
-    // Fetch top 5 pages in parallel
-    debugLog(`Fetching top ${Math.min(searchCtx.results.length, 5)} pages...`)
-    const articles = await fetchArticles(searchCtx.results, 5)
-    debugLog(`Got ${articles.length} articles`)
-
-    const contextMessage = buildArticleContext(articles, query, searchCtx.extract)
-    debugLog(`Context message length: ${contextMessage.length} chars`)
-
-    return { contextMessage, originalTxt }
-  } catch (err) {
-    debugLog(`Search pipeline error: ${err}`)
-  }
-  return null
-}
-
-/**
- * Build weather context message to pass to LLM.
- */
-function buildWeatherContext(weather: WeatherData): string {
-  const sunriseStr = new Date(weather.sunrise * 1000).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
-  const sunsetStr = new Date(weather.sunset * 1000).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
-  const locationStr = weather.location
-    ? `Ubicación detectada (IP): ${weather.location.city}, ${weather.location.region}`
-    : `Ciudad consultada: ${weather.city_query}`
-
-  return [
-    `[DATOS REALES DEL CLIMA — obtenidos ahora mismo vía API]`,
-    `Ciudad: ${weather.city_name}, ${weather.country}`,
-    `Condición: ${weather.description}`,
-    `Temperatura: ${weather.temp}°C (sensación térmica ${weather.feels_like}°C)`,
-    `Humedad: ${weather.humidity}%`,
-    `Presión: ${weather.pressure} hPa`,
-    `Viento: ${weather.wind_speed} m/s`,
-    `Visibilidad: ${(weather.visibility / 1000).toFixed(1)} km`,
-    `Nubosidad: ${weather.clouds}%`,
-    `Amanecer: ${sunriseStr} / Atardecer: ${sunsetStr}`,
-    locationStr,
-    ``,
-    `Con estos datos reales responde la pregunta del usuario de forma natural y conversacional. NO digas que no tienes acceso a internet — estos datos son reales y actuales.`,
-  ].join('\n')
-}
-
-/**
- * Sports pipeline: detect league + date range → ESPN API → formatted context.
- * Returns null if no league detected (falls back to webSearch).
- */
-async function performSportsQuery(query: string): Promise<string | null> {
-  const leagueSlug = detectLeague(query)
-  if (!leagueSlug) {
-    debugLog('No league detected — falling back to webSearch')
-    return null
-  }
-
-  const intent = detectDateIntent(query)
-  const hasExplicit = hasExplicitDateRange(query)
-
-  try {
-    // Use lastMatchday when explicitly requested OR when no date is specified
-    // (generic "jornada de la liga" → find the most recent matchday automatically)
-    if (intent === 'lastMatchday' || !hasExplicit) {
-      debugLog(`Sports query: league=${leagueSlug}, intent=${intent === 'lastMatchday' ? 'lastMatchday' : 'auto-lastMatchday'}`)
-      const range = await getLastMatchdayRange(leagueSlug)
-      debugLog(`Last matchday range: ${range.from.toISOString().slice(0, 10)} to ${range.to.toISOString().slice(0, 10)}`)
-      const scoreboard = await getScoreboard(leagueSlug, range)
-      debugLog(`ESPN returned ${scoreboard.games.length} games`)
-      return formatScoreboardContext(scoreboard, scoreboard.effectiveRange)
-    }
-
-    // intent === 'range' with explicit date keyword (hoy, semana pasada, fin de semana, etc.)
-    const explicitRange = detectDateRange(query)
-    debugLog(`Sports query: league=${leagueSlug}, range=${explicitRange.from.toISOString().slice(0, 10)} to ${explicitRange.to.toISOString().slice(0, 10)}`)
-
-    const scoreboard = await getScoreboard(leagueSlug, explicitRange)
-    debugLog(`ESPN returned ${scoreboard.games.length} games`)
-    return formatScoreboardContext(scoreboard, scoreboard.effectiveRange)
-  } catch (err) {
-    debugLog(`ESPN API error: ${err}`)
-    return null
-  }
-}
 
 interface ChatProps {
   resumeSessionId?: string
@@ -505,9 +257,6 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
       const sendToLLM = async (): Promise<void> => {
         // Build conversation history from all previous turns.
-        // messagesRef.current at this point has: [...prevTurns, {user: txt}, {assistant: ""}]
-        // We exclude the last entry (current user msg) since we push userContent separately,
-        // and filter out empty assistant placeholders and empty recall messages.
         const history: { role: string; content: string }[] = messagesRef.current
           .slice(0, -2) // remove current user msg + empty assistant placeholder
           .filter((m) => {
@@ -525,131 +274,67 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             return { role: m.role, content: m.content }
           })
 
-        let userContent = txt
-        let searchContext: string | null = null
-
-        // Route the query to determine what action to take
         const isExplicitSearch = /^\/search\s+/i.test(txt)
-        const searchQuery = isExplicitSearch
-          ? txt.replace(/^\/search\s+/i, '').trim()
-          : txt
 
-        if (isExplicitSearch) {
-          // Explicit /search command — always search
+        // processQuery calls onStatus as soon as it knows what tool to use,
+        // allowing TUI to show the status message before async work completes.
+        const agentResult = await processQuery(txt, isExplicitSearch, (statusMsg) => {
           updateMessages((m) => {
             const copy = [...m]
             const last = copy[copy.length - 1]
-            if (last?.role === 'assistant') last.content = '🔍 Searching the web...'
+            if (last?.role === 'assistant') last.content = statusMsg
             return copy
           })
+        })
 
-          const result = await performSearch(searchQuery, txt)
-          if (result) {
-            searchContext = result.contextMessage
-            userContent = searchQuery
-          }
+        // Clear status before streaming the real response
+        updateMessages((m) => {
+          const copy = [...m]
+          const last = copy[copy.length - 1]
+          if (last?.role === 'assistant') last.content = ''
+          return copy
+        })
 
+        // If router returned 'none', run the ReAct loop so the LLM can
+        // self-direct tool usage if needed, rather than a blind streamChat.
+        if (agentResult.useReAct && !isExplicitSearch) {
+          const reactResult = await processQueryWithReAct(
+            agentResult.userContent,
+            history,
+            (statusMsg) => {
+              updateMessages((m) => {
+                const copy = [...m]
+                const last = copy[copy.length - 1]
+                if (last?.role === 'assistant') last.content = statusMsg
+                return copy
+              })
+            },
+            (toolName) => {
+              updateMessages((m) => {
+                const copy = [...m]
+                const last = copy[copy.length - 1]
+                if (last?.role === 'assistant') last.content = `🔧 Using tool: ${toolName}...`
+                return copy
+              })
+            },
+          )
+
+          // Display the ReAct final answer directly (no streaming)
           updateMessages((m) => {
             const copy = [...m]
             const last = copy[copy.length - 1]
-            if (last?.role === 'assistant') last.content = ''
+            if (last?.role === 'assistant') last.content = reactResult.answer
             return copy
           })
-        } else {
-          // Use the router to decide
-          const routerResult = await routeQuery(txt)
-          const { decision } = routerResult
-          debugLog(`Router decision: ${decision} (source: ${routerResult.source}, confidence: ${routerResult.confidence})`)
-
-          if (decision === 'getDateTime') {
-            const t = tools.get_time()
-            userContent = `Current time: ${t.time}, date: ${t.date}. User asked: "${txt}". Answer naturally.`
-
-          } else if (decision === 'getWeather') {
-            updateMessages((m) => {
-              const copy = [...m]
-              const last = copy[copy.length - 1]
-              if (last?.role === 'assistant') last.content = '🌤 Obteniendo clima...'
-              return copy
-            })
-
-            try {
-              const city = extractCityFromQuery(txt)
-              debugLog(`Weather query — city extracted: ${city ?? '(none, using IP location)'}`)
-              const weather = city
-                ? await getWeatherByCity(city)
-                : await getCurrentWeather()
-              const ctx = buildWeatherContext(weather)
-              userContent = `${ctx}\n\nPregunta del usuario: ${txt}`
-            } catch (err) {
-              const errMsg = err instanceof Error ? err.message : String(err)
-              userContent = `No se pudo obtener el clima: ${errMsg}. Informa al usuario de forma amable.`
-            }
-
-            updateMessages((m) => {
-              const copy = [...m]
-              const last = copy[copy.length - 1]
-              if (last?.role === 'assistant') last.content = ''
-              return copy
-            })
-
-          } else if (decision === 'sportsQuery') {
-            updateMessages((m) => {
-              const copy = [...m]
-              const last = copy[copy.length - 1]
-              if (last?.role === 'assistant') last.content = '⚽ Consultando resultados deportivos...'
-              return copy
-            })
-
-            const sportsCtx = await performSportsQuery(txt)
-            if (sportsCtx) {
-              searchContext = sportsCtx
-              userContent = txt
-            } else {
-              // League not recognized — fall back to web search
-              const result = await performSearch(txt, txt)
-              if (result) {
-                searchContext = result.contextMessage
-                userContent = txt
-              }
-            }
-
-            updateMessages((m) => {
-              const copy = [...m]
-              const last = copy[copy.length - 1]
-              if (last?.role === 'assistant') last.content = ''
-              return copy
-            })
-
-          } else if (decision === 'webSearch') {
-            updateMessages((m) => {
-              const copy = [...m]
-              const last = copy[copy.length - 1]
-              if (last?.role === 'assistant') last.content = '🔍 Searching the web...'
-              return copy
-            })
-
-            const result = await performSearch(searchQuery, txt)
-            if (result) {
-              searchContext = result.contextMessage
-              userContent = txt
-            }
-
-            updateMessages((m) => {
-              const copy = [...m]
-              const last = copy[copy.length - 1]
-              if (last?.role === 'assistant') last.content = ''
-              return copy
-            })
-          }
-          // else: decision === 'none' → userContent stays as txt
+          buffer.current = reactResult.answer
+          return
         }
 
         // Inject search context as a system message before the user message
-        if (searchContext) {
-          history.push({ role: 'system', content: searchContext })
+        if (agentResult.searchContext) {
+          history.push({ role: 'system', content: agentResult.searchContext })
         }
-        history.push({ role: 'user', content: userContent })
+        history.push({ role: 'user', content: agentResult.userContent })
 
         await streamChat('', (tok) => {
           buffer.current += tok

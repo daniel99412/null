@@ -5,6 +5,7 @@ import {
   deleteSessionMessages,
   archiveSession,
 } from './sessions.js'
+import { getDefaultClient } from '../core/llm-client.js'
 
 const CLEANUP_THRESHOLD_DAYS = 30
 
@@ -18,33 +19,15 @@ Your summary should:
 Write the summary in the same language the conversation was held in.
 Do NOT start with "In this conversation..." or similar filler. Go straight to the content.`
 
-interface OllamaResponse {
-  message?: { content?: string }
-}
-
 /**
  * Call Ollama without streaming to get a complete response.
  */
 async function generateSummary(conversationText: string): Promise<string> {
-  const res = await fetch('http://localhost:11434/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'qwen2.5-coder:7b',
-      stream: false,
-      messages: [
-        { role: 'system', content: SUMMARIZE_PROMPT },
-        { role: 'user', content: conversationText },
-      ],
-    }),
-  })
-
-  if (!res.ok) {
-    throw new Error(`Ollama summarization failed: ${res.status}`)
-  }
-
-  const data = await res.json() as OllamaResponse
-  return data.message?.content || ''
+  const client = getDefaultClient()
+  return client.complete([
+    { role: 'system', content: SUMMARIZE_PROMPT },
+    { role: 'user', content: conversationText },
+  ])
 }
 
 /**

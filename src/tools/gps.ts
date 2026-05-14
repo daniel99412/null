@@ -38,7 +38,7 @@ async function getCurrentIP(): Promise<string> {
  * Resolve IP → location via ipapi.co.
  * Only called when IP has changed — avoids rate limit.
  */
-async function resolveLocation(ip: string): Promise<GeoLocation> {
+async function resolveWithIpapi(ip: string): Promise<GeoLocation> {
   const res = await fetchWithTimeout(`https://ipapi.co/${ip}/json/`)
   if (!res.ok) throw new Error(`ipapi.co responded with ${res.status}`)
 
@@ -67,6 +67,95 @@ async function resolveLocation(ip: string): Promise<GeoLocation> {
     timezone: data.timezone,
     ip: data.ip,
   }
+}
+
+/**
+ * Resolve IP → location via ip-api.com (fallback, no key needed, generous limits).
+ */
+async function resolveWithIpApiCom(ip: string): Promise<GeoLocation> {
+  const res = await fetchWithTimeout(`http://ip-api.com/json/${ip}?fields=status,lat,lon,city,regionName,country,countryCode,timezone,query`)
+  if (!res.ok) throw new Error(`ip-api.com responded with ${res.status}`)
+
+  const data = await res.json() as {
+    status: string
+    lat: number
+    lon: number
+    city: string
+    regionName: string
+    country: string
+    countryCode: string
+    timezone: string
+    query: string
+  }
+
+  if (data.status !== 'success') throw new Error('ip-api.com: request failed')
+
+  return {
+    lat: data.lat,
+    lon: data.lon,
+    city: data.city,
+    region: data.regionName,
+    country: data.country,
+    country_code: data.countryCode,
+    timezone: data.timezone,
+    ip: data.query,
+  }
+}
+
+/**
+ * Resolve IP → location via ipwho.is (second fallback, no key needed).
+ */
+async function resolveWithIpwho(ip: string): Promise<GeoLocation> {
+  const res = await fetchWithTimeout(`https://ipwho.is/${ip}`)
+  if (!res.ok) throw new Error(`ipwho.is responded with ${res.status}`)
+
+  const data = await res.json() as {
+    success: boolean
+    latitude: number
+    longitude: number
+    city: string
+    region: string
+    country: string
+    country_code: string
+    timezone: { id: string }
+    ip: string
+    message?: string
+  }
+
+  if (!data.success) throw new Error(`ipwho.is: ${data.message ?? 'unknown error'}`)
+
+  return {
+    lat: data.latitude,
+    lon: data.longitude,
+    city: data.city,
+    region: data.region,
+    country: data.country,
+    country_code: data.country_code,
+    timezone: data.timezone.id,
+    ip: data.ip,
+  }
+}
+
+/**
+ * Resolve IP → location, trying multiple services in order:
+ * ipapi.co → ip-api.com → ipwho.is
+ */
+async function resolveLocation(ip: string): Promise<GeoLocation> {
+  const providers: Array<() => Promise<GeoLocation>> = [
+    () => resolveWithIpapi(ip),
+    () => resolveWithIpApiCom(ip),
+    () => resolveWithIpwho(ip),
+  ]
+
+  let lastError: unknown
+  for (const provider of providers) {
+    try {
+      return await provider()
+    } catch (err) {
+      lastError = err
+    }
+  }
+  throw new Error(`All geolocation providers failed. Last error: ${lastError}`)
 }
 
 /**

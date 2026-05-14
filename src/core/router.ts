@@ -1,4 +1,5 @@
 import { normalizeQuery } from '../utils/normalize.js'
+import { getRouterClient } from './llm-client.js'
 
 const ROUTER_SYSTEM_PROMPT = `You are a strict tool router.
 Your job is to classify the user query into exactly one of three options.
@@ -21,8 +22,6 @@ Rules:
 Respond ONLY with valid JSON. No text before or after.
 { "tool": "webSearch" | "getDateTime" | "getWeather" | "none" | "sportsQuery" , "confidence": number }`.trim()
 
-const MODEL = 'qwen2.5-coder:7b'
-
 export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'none'
 
 export interface RouterResult {
@@ -31,173 +30,164 @@ export interface RouterResult {
   source: 'heuristic' | 'llm'
 }
 
-interface OllamaChatResponse {
-  message?: { content?: string }
+// ─── Scoring system ───────────────────────────────────────────────────────────
+
+interface Signal {
+  pattern: RegExp
+  intent: RoutingDecision
+  weight: number
+  description?: string
 }
+
+/**
+ * Weighted signals for scoring queries.
+ * Positive weight = favors that intent.
+ * Multiple signals for the same intent accumulate.
+ *
+ * Threshold:
+ *   score >= 8  → heuristic decision (confidence 1.0)
+ *   score >= 5  → heuristic decision (confidence 0.85)
+ *   score < 5   → fallback to LLM
+ */
+const SIGNALS: Signal[] = [
+  // ── NONE — programming / technical (very high weight to block search) ──────
+  { pattern: /\b(function|class|clase|array|loop|recursion|recursiva|algoritmo|algorithm)\b/i, intent: 'none', weight: 12, description: 'programming keyword' },
+  { pattern: /\b(hola mundo|hello world)\b/i, intent: 'none', weight: 12, description: 'hello world' },
+  { pattern: /\b(code|syntax|compile|debug|variable|method)\b/i, intent: 'none', weight: 12, description: 'code keyword' },
+  { pattern: /(?:^|\s)(código|compilar|método)(?:\s|$)/i, intent: 'none', weight: 12, description: 'código/compilar' },
+  // ── NONE — science / math ─────────────────────────────────────────────────
+  { pattern: /\b(teorema|theorem)\b/i, intent: 'none', weight: 10, description: 'teorema' },
+  { pattern: /(?:^|\s)(ecuación|equation|fórmula|formula|derivada|integral)(?:\s|$)/i, intent: 'none', weight: 10, description: 'math' },
+  { pattern: /\b(ley de newton|law of|gravedad|gravity)\b/i, intent: 'none', weight: 10, description: 'physics law' },
+  { pattern: /(?:^|\s)(evolución|evolution|relatividad|relativity)(?:\s|$)/i, intent: 'none', weight: 10, description: 'science concept' },
+  { pattern: /\b(capital de|capital of|continente|continent)\b/i, intent: 'none', weight: 8, description: 'geography' },
+  { pattern: /(?:^|\s)(océano|ocean|montaña|mountain)(?:\s|$)/i, intent: 'none', weight: 8, description: 'geography' },
+  { pattern: /(?:^|\s)(tabla periódica|periodic table|elemento químico|chemical element)(?:\s|$)/i, intent: 'none', weight: 10, description: 'chemistry' },
+  { pattern: /(?:^|\s)(cuántos|how many|cuánto mide|how tall|cuánto pesa|how much does)(?:\s).*\b(planeta|planet|país|country|estado|state)\b/i, intent: 'none', weight: 8, description: 'factual geography/science' },
+  // ── NONE — history / knowledge ────────────────────────────────────────────
+  { pattern: /\b(guerra|war|batalla|battle|conquista|conquest|tratado|treaty|imperio|empire)\b/i, intent: 'none', weight: 6, description: 'history event' },
+  { pattern: /(?:^|\s)(revolución|revolution|independencia|independence|reforma|reform)(?:\s|$)/i, intent: 'none', weight: 6, description: 'history movement' },
+  { pattern: /\b(edad media|middle ages|renacimiento|renaissance|colonia|colonial)\b/i, intent: 'none', weight: 8, description: 'historical period' },
+  { pattern: /(?:^|\s)(quién fue|who was|quién inventó|who invented|biografía|biography)(?:\s|$)/i, intent: 'none', weight: 6, description: 'biographical question' },
+  { pattern: /\b(leyes de|laws of)\b/i, intent: 'none', weight: 6, description: 'established laws' },
+  { pattern: /(?:^|\s)(constitución|constitution|doctrina|doctrine)(?:\s|$)/i, intent: 'none', weight: 6, description: 'doctrine/constitution' },
+  { pattern: /(?:^|\s)(qué sabes|que sabes|qué fue|que fue|qué es|que es)(?:\s|$)/i, intent: 'none', weight: 4, description: 'knowledge question' },
+  { pattern: /(?:^|\s)(cuéntame|cuentame|háblame|hablame|explícame|explicame|dime)\b.*\b(sobre|de|acerca)\b/i, intent: 'none', weight: 4, description: 'tell me about' },
+  { pattern: /\b(explain|tell me about|what is|what was|what were)\b/i, intent: 'none', weight: 4, description: 'explain/what is' },
+
+  // ── GETDATETIME ───────────────────────────────────────────────────────────
+  { pattern: /\b(qué hora|what time|que hora)\b/i, intent: 'getDateTime', weight: 12, description: 'time query' },
+  { pattern: /\b(qué día|what day|qué fecha|what date|en qué fecha)\b/i, intent: 'getDateTime', weight: 12, description: 'date query' },
+  { pattern: /\b(today'?s date|what is today|what's today)\b/i, intent: 'getDateTime', weight: 12, description: "today's date" },
+
+  // ── GETWEATHER ────────────────────────────────────────────────────────────
+  { pattern: /\b(clima|weather|temperatura|temperature)\b/i, intent: 'getWeather', weight: 10, description: 'weather/temp keyword' },
+  { pattern: /\b(calor|fr[íi]o|lluvia|rain|nublado|cloudy|pron[oó]stico|forecast)\b/i, intent: 'getWeather', weight: 8, description: 'weather condition' },
+  { pattern: /(?:^|\s)(c[oó]mo\s+est[aá]\s+el\s+(clima|tiempo|d[íi]a))(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'how is the weather' },
+  { pattern: /(?:^|\s)(qu[eé]\s+temperatura)(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'what temperature' },
+  { pattern: /(?:^|\s)(va\s+a\s+llover|va\s+a\s+hacer\s+(calor|fr[íi]o))(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'will it rain/be hot' },
+
+  // ── SPORTSQUERY ───────────────────────────────────────────────────────────
+  { pattern: /\b(resultados?|marcador(es)?|scores?)\b/i, intent: 'sportsQuery', weight: 10, description: 'scores/results' },
+  { pattern: /(?:^|\s)(últimos|ultimos)\b.*\b(partidos?|juegos?|encuentros?)\b/i, intent: 'sportsQuery', weight: 10, description: 'last matches' },
+  { pattern: /(?:^|\s)(cómo|como|cuánto|cuanto)\b.*(quedó|quedo|terminó|termino|ganó|gano)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 10, description: 'how did it end/who won' },
+  { pattern: /\b(tabla\s+de\s+posiciones|tabla\s+general|standings?|clasificaci[oó]n|posiciones)\b/i, intent: 'sportsQuery', weight: 10, description: 'standings' },
+  { pattern: /(?:^|\s)(próximos|proximos)\b.*\b(partidos?|juegos?|encuentros?)\b/i, intent: 'sportsQuery', weight: 10, description: 'upcoming matches' },
+  { pattern: /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada|ultima\s+jornada|jornada\s+anterior)\b/i, intent: 'sportsQuery', weight: 10, description: 'matchday/fixture' },
+  { pattern: /(?:^|\s)(última\s+jornada)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 10, description: 'last matchday' },
+  { pattern: /\bjornada\b.*(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue)/i, intent: 'sportsQuery', weight: 10, description: 'jornada + league' },
+  { pattern: /(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue).*\bjornada\b/i, intent: 'sportsQuery', weight: 10, description: 'league + jornada' },
+  { pattern: /\bjornada\b.*(estuvo|fue|quedó|quedo|terminó|termino|salió|salio)/i, intent: 'sportsQuery', weight: 10, description: 'jornada result' },
+  { pattern: /(?:como|cómo|qué tal|que tal)\b.*\bjornada\b/i, intent: 'sportsQuery', weight: 10, description: 'how was the jornada' },
+  { pattern: /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|laliga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i, intent: 'sportsQuery', weight: 10, description: 'league + time keyword' },
+  { pattern: /\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|la\s+liga|laliga|champions)\b/i, intent: 'sportsQuery', weight: 10, description: 'time keyword + league' },
+  { pattern: /(?:^|\s)(juega|juegan|jugaron)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 8, description: 'plays/played' },
+  { pattern: /(?:^|\s)(jugó|jugara|jugará)/i, intent: 'sportsQuery', weight: 8, description: 'played/will play' },
+  { pattern: /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i, intent: 'sportsQuery', weight: 10, description: 'match of + time' },
+
+  // ── WEBSEARCH — recency / news ────────────────────────────────────────────
+  { pattern: /\b(20[2-9][4-9]|20[3-9]\d)\b/, intent: 'webSearch', weight: 10, description: 'year post-cutoff' },
+  { pattern: /\b(hoy|today|ahorita|ahora|right now)\b.*\b(precio|price|clima|weather|dólar|dollar)\b/i, intent: 'webSearch', weight: 10, description: 'today + price/rate' },
+  { pattern: /\b(últimas?|latest|reciente|recent|noticias?|news|breaking)\b/i, intent: 'webSearch', weight: 8, description: 'news/latest' },
+  { pattern: /\b(precio|cotización|exchange rate)\b.*\b(dólar|euro|bitcoin|crypto)\b/i, intent: 'webSearch', weight: 10, description: 'price of currency/crypto' },
+  // Recency adds minor score to webSearch
+  { pattern: /(?:^|\s)(hoy|today|ahora|now|actual|current|últim[oa]s?|latest|reciente|recent|este año|this year|esta semana|this week|ayer|yesterday)(?:\s|$|[?,.])/i, intent: 'webSearch', weight: 3, description: 'recency indicator' },
+]
+
+function scoreQuery(query: string): Record<RoutingDecision, number> {
+  const scores: Record<RoutingDecision, number> = {
+    webSearch: 0,
+    getDateTime: 0,
+    getWeather: 0,
+    sportsQuery: 0,
+    none: 0,
+  }
+
+  for (const signal of SIGNALS) {
+    if (signal.pattern.test(query)) {
+      scores[signal.intent] += signal.weight
+    }
+  }
+
+  return scores
+}
+
+function topDecision(scores: Record<RoutingDecision, number>): {
+  decision: RoutingDecision
+  confidence: number
+  scores: Record<RoutingDecision, number>
+} {
+  let best: RoutingDecision = 'none'
+  let bestScore = 0
+
+  for (const [intent, score] of Object.entries(scores) as [RoutingDecision, number][]) {
+    if (score > bestScore) {
+      bestScore = score
+      best = intent
+    }
+  }
+
+  const confidence = bestScore >= 8 ? 1.0 : bestScore >= 5 ? 0.85 : 0
+
+  return { decision: best, confidence, scores }
+}
+
+// ─── LLM fallback ─────────────────────────────────────────────────────────────
 
 async function chat(messages: { role: string; content: string }[], systemPrompt: string): Promise<string> {
-  const body = {
-    model: MODEL,
-    stream: false,
-    messages: [{ role: 'system', content: systemPrompt }, ...messages],
-  }
-
-  const res = await fetch('http://localhost:11434/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) {
-    throw new Error(`Ollama chat failed: ${res.status}`)
-  }
-
-  const data = await res.json() as OllamaChatResponse
-  return data.message?.content || ''
+  const client = getRouterClient()
+  return client.complete([
+    { role: 'system', content: systemPrompt },
+    ...messages.map((m) => ({
+      role: m.role as 'system' | 'user' | 'assistant',
+      content: m.content,
+    })),
+  ])
 }
 
-// Heurísticas a implementar (corren ANTES del LLM)
-// Fuerza NONE — nunca buscar esto (general knowledge, history, programming, science)
-const FORCE_NONE_PATTERNS = [
-  // Programming / technical
-  /\b(function|clase|class|array|loop|recursion|recursiva|algoritmo|algorithm)\b/i,
-  /\b(hola mundo|hello world)\b/i,
-  /\b(code|syntax|compile|debug|variable|method)\b/i,
-  /(?:^|\s)(código|compilar|método)(?:\s|$)/i,
-  // Science / math / geography (use (?:^|\s) for accented words)
-  /\b(teorema|theorem)\b/i,
-  /(?:^|\s)(ecuación|equation|fórmula|formula|derivada|integral)(?:\s|$)/i,
-  /\b(ley de newton|law of|gravedad|gravity)\b/i,
-  /(?:^|\s)(evolución|evolution|relatividad|relativity)(?:\s|$)/i,
-  /\b(capital de|capital of|continente|continent)\b/i,
-  /(?:^|\s)(océano|ocean|montaña|mountain)(?:\s|$)/i,
-  /(?:^|\s)(tabla periódica|periodic table|elemento químico|chemical element)(?:\s|$)/i,
-  /(?:^|\s)(cuántos|how many|cuánto mide|how tall|cuánto pesa|how much does)(?:\s).*\b(planeta|planet|país|country|estado|state)\b/i,
-]
-
-// Patterns that indicate a knowledge/history question (not needing search)
-// Only apply if the query does NOT also match FORCE_SEARCH_PATTERNS
-// Note: use (?:^|\s) instead of \b for accented words (JS \b doesn't support Unicode)
-const KNOWLEDGE_QUESTION_PATTERNS = [
-  // "qué sabes de X", "qué fue X", "cuéntame sobre X", "explícame X", "háblame de X"
-  /(?:^|\s)(qué sabes|que sabes|qué fue|que fue|qué es|que es)(?:\s|$)/i,
-  /(?:^|\s)(cuéntame|cuentame|háblame|hablame|explícame|explicame|dime)\b.*\b(sobre|de|acerca)\b/i,
-  /\b(explain|tell me about|what is|what was|what were)\b/i,
-  // Historical events: guerra, batalla, conquista, tratado, etc.
-  /\b(guerra|war|batalla|battle|conquista|conquest|tratado|treaty|imperio|empire)\b/i,
-  /(?:^|\s)(revolución|revolution|independencia|independence|reforma|reform)(?:\s|$)/i,
-  /\b(edad media|middle ages|renacimiento|renaissance|colonia|colonial)\b/i,
-  // Historical figures
-  /(?:^|\s)(quién fue|who was|quién inventó|who invented|biografía|biography)(?:\s|$)/i,
-  // Established concepts
-  /\b(leyes de|laws of)\b/i,
-  /(?:^|\s)(constitución|constitution|doctrina|doctrine)(?:\s|$)/i,
-]
-
-// Indicators that even a "knowledge-sounding" query needs fresh data
-// Note: avoid \b around accented chars (JS regex \b doesn't support Unicode)
-const RECENCY_INDICATORS = /(?:^|\s)(hoy|today|ahora|now|actual|current|últim[oa]s?|latest|reciente|recent|202[4-9]|20[3-9]\d|este año|this year|esta semana|this week|ayer|yesterday)(?:\s|$|[?,.])/i
-
-// Fuerza SPORTSQUERY — consultas deportivas con resultados, marcadores, tabla, etc.
-// Debe correr ANTES de FORCE_SEARCH_PATTERNS para no caer en webSearch genérico
-const FORCE_SPORTS_PATTERNS = [
-  // Resultados / marcadores
-  /\b(resultados?|marcador(es)?|scores?)\b/i,
-  /(?:^|\s)(últimos|ultimos)\b.*\b(partidos?|juegos?|encuentros?)\b/i,
-  // "cómo quedó/terminó/ganó" — use (?:^|\s) for accented words (\b fails with Unicode)
-  /(?:^|\s)(cómo|como|cuánto|cuanto)\b.*(quedó|quedo|terminó|termino|ganó|gano)(?:\s|$|[?,.])/i,
-  // Tabla de posiciones / standings
-  /\b(tabla\s+de\s+posiciones|tabla\s+general|standings?|clasificaci[oó]n|posiciones)\b/i,
-  // Próximos partidos / calendario
-  /(?:^|\s)(próximos|proximos)\b.*\b(partidos?|juegos?|encuentros?)\b/i,
-  // "última jornada" — ú is non-word char so \b fails, use (?:^|\s)
-  /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada|ultima\s+jornada|jornada\s+anterior)\b/i,
-  /(?:^|\s)(última\s+jornada)(?:\s|$|[?,.])/i,
-  // bare "jornada" + any known league (order-independent)
-  /\bjornada\b.*(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue)/i,
-  /(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue).*\bjornada\b/i,
-  // bare "jornada" when asking how it went / results
-  /\bjornada\b.*(estuvo|fue|quedó|quedo|terminó|termino|salió|salio)/i,
-  /(?:como|cómo|qué tal|que tal)\b.*\bjornada\b/i,
-  // Ligas específicas + palabras clave deportivas (order-independent with .*|.*)
-  /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|laliga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i,
-  /\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|la\s+liga|laliga|champions)\b/i,
-  // "juega hoy", "partido de X", "juego de X"
-  // "juega hoy", "jugó ayer" — jugó/jugará end in accented char, use (?:\s|$) at end
-  /(?:^|\s)(juega|juegan|jugaron)(?:\s|$|[?,.])/i,
-  /(?:^|\s)(jugó|jugara|jugará)/i,
-  /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i,
-]
-
-
-const FORCE_SEARCH_PATTERNS = [
-  /\b(20[2-9][4-9]|20[3-9]\d)\b/,          // años después del cutoff (2024+)
-  /\b(hoy|today|ahorita|ahora|right now)\b.*\b(precio|price|clima|weather|dólar|dollar)\b/i,
-  /\b(últimas?|latest|reciente|recent|noticias?|news|breaking)\b/i,
-  /\b(precio|cotización|exchange rate)\b.*\b(dólar|euro|bitcoin|crypto)\b/i,
-]
-
-// Fuerza GETWEATHER — consultas de clima/temperatura
-const FORCE_WEATHER_PATTERNS = [
-  /\b(clima|weather|temperatura|temperature|calor|fr[íi]o|lluvia|rain|nublado|cloudy|pron[oó]stico|forecast)\b/i,
-  /(?:^|\s)(c[oó]mo\s+est[aá]\s+el\s+(clima|tiempo|d[íi]a))(?:\s|$|[?,.])/i,
-  /(?:^|\s)(qu[eé]\s+temperatura)(?:\s|$|[?,.])/i,
-  /(?:^|\s)(va\s+a\s+llover|va\s+a\s+hacer\s+(calor|fr[íi]o))(?:\s|$|[?,.])/i,
-]
-
-// Fuerza GETDATETIME
-const FORCE_DATETIME_PATTERNS = [
-  /\b(qué hora|what time|que hora)\b/i,
-  /\b(qué día|what day|qué fecha|what date|en qué fecha)\b/i,
-  /\b(today'?s date|what is today|what's today)\b/i,
-]
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function routeQuery(query: string): Promise<RouterResult> {
   const normalizedQuery = normalizeQuery(query)
+  const scores = scoreQuery(normalizedQuery)
+  const { decision, confidence, scores: debugScores } = topDecision(scores)
 
-  // Heuristic checks — order matters: FORCE_NONE first, then SEARCH, then DATETIME
-  for (const pattern of FORCE_NONE_PATTERNS) {
-    if (pattern.test(normalizedQuery)) {
-      return { decision: 'none', confidence: 1, source: 'heuristic' }
-    }
+  // Log scores in debug mode
+  if (process.env['NULL_DEBUG']) {
+    process.stderr.write(`[router] scores: ${JSON.stringify(debugScores)}\n`)
   }
 
-  for (const pattern of FORCE_SPORTS_PATTERNS) {
-    if (pattern.test(normalizedQuery)) {
-      return { decision: 'sportsQuery', confidence: 1, source: 'heuristic' }
+  // If score is high enough, use heuristic directly
+  if (confidence > 0) {
+    // For 'none' decisions with recency signals: don't force none if web is close
+    if (decision === 'none' && scores.webSearch >= 3) {
+      // Recency indicator present even with a "knowledge" match — search is safer
+      return { decision: 'webSearch', confidence: 0.7, source: 'heuristic' }
     }
+    return { decision, confidence, source: 'heuristic' }
   }
 
-  for (const pattern of FORCE_WEATHER_PATTERNS) {
-    if (pattern.test(normalizedQuery)) {
-      return { decision: 'getWeather', confidence: 1, source: 'heuristic' }
-    }
-  }
-
-  for (const pattern of FORCE_SEARCH_PATTERNS) {
-    if (pattern.test(normalizedQuery)) {
-      return { decision: 'webSearch', confidence: 1, source: 'heuristic' }
-    }
-  }
-
-  for (const pattern of FORCE_DATETIME_PATTERNS) {
-    if (pattern.test(normalizedQuery)) {
-      return { decision: 'getDateTime', confidence: 1, source: 'heuristic' }
-    }
-  }
-
-  // Knowledge question check: if it sounds like a history/knowledge question
-  // AND does NOT have recency indicators, force NONE
-  const hasRecency = RECENCY_INDICATORS.test(normalizedQuery)
-  if (!hasRecency) {
-    for (const pattern of KNOWLEDGE_QUESTION_PATTERNS) {
-      if (pattern.test(normalizedQuery)) {
-        return { decision: 'none', confidence: 0.9, source: 'heuristic' }
-      }
-    }
-  }
-
-  // Fallback to LLM router if no heuristic match
+  // Low-confidence score: fall back to LLM
   try {
     const llmResponse = await chat(
       [{ role: 'user', content: normalizedQuery }],
@@ -205,17 +195,13 @@ export async function routeQuery(query: string): Promise<RouterResult> {
     )
     const parsed = JSON.parse(llmResponse) as { tool: RoutingDecision; confidence: number }
     if (['webSearch', 'getDateTime', 'getWeather', 'sportsQuery', 'none'].includes(parsed.tool)) {
-      // If LLM says "none" but with low confidence, default to webSearch
-      // Better to search unnecessarily than to hallucinate about unknown topics
       if (parsed.tool === 'none' && parsed.confidence < 0.7) {
         return { decision: 'webSearch', confidence: parsed.confidence, source: 'llm' }
       }
       return { decision: parsed.tool, confidence: parsed.confidence, source: 'llm' }
     }
-    // Fallback if LLM returns an invalid tool — search to be safe
     return { decision: 'webSearch', confidence: 0.5, source: 'llm' }
-  } catch (error) {
-    // Fallback if LLM call fails or returns malformed JSON — search to be safe
+  } catch {
     return { decision: 'webSearch', confidence: 0, source: 'llm' }
   }
 }

@@ -5,9 +5,21 @@ const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
  * Strips HTML tags, scripts, styles, and excess whitespace.
  * Preserves table structure as formatted text.
  */
-export async function fetchPageText(url: string, maxChars: number = 8000): Promise<string> {
+export async function fetchPageText(
+  url: string,
+  options?: {
+    maxChars?: number
+    signal?: AbortSignal
+  },
+): Promise<string> {
+  const maxChars = options?.maxChars ?? 8000
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 10000)
+  const timeout = setTimeout(() => controller.abort(), 4000)
+
+  // If an external signal is provided, forward its abort
+  const externalSignal = options?.signal
+  const onExternalAbort = () => controller.abort()
+  externalSignal?.addEventListener('abort', onExternalAbort)
 
   try {
     const res = await fetch(url, {
@@ -35,6 +47,7 @@ export async function fetchPageText(url: string, maxChars: number = 8000): Promi
     return extractText(html, maxChars)
   } finally {
     clearTimeout(timeout)
+    externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
 
