@@ -7,10 +7,12 @@ import { debugLog } from '../utils/debug.js'
 // This keeps the prompt injection focused and avoids retrieval pollution.
 
 export type QueryProfile =
+  | 'sports'    // only inject preference memories (teams, leagues, sports)
   | 'tech'      // inject tech_stack, occupation, project, goal
   | 'general'   // inject all types with score >= threshold
 
 const PROFILE_TYPES: Record<QueryProfile, MemoryType[]> = {
+  sports: ['preference'],
   tech: ['tech_stack', 'occupation', 'project', 'goal'],
   general: [
     'preference', 'tech_stack', 'occupation', 'goal',
@@ -119,6 +121,14 @@ export function buildMemoryContext(
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Convenience: build context specifically for sports queries.
+ * Replaces buildPreferencesContext() from preferences.ts.
+ */
+export function buildSportsMemoryContext(): string | null {
+  return buildMemoryContext('sports')
 }
 
 /**
