@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react'
-import { Box, Text, useInput } from 'ink'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Box, Text, useInput, useWindowSize } from 'ink'
 import { fetchPageText } from '../../tools/web-fetch.js'
 import { useTheme } from '../context/ThemeContext.js'
+import { useScroll } from '../hooks/useScroll.js'
+import { wrapText } from '../utils/text.js'
 
 export interface DigestArticle {
   position: number
@@ -18,10 +20,13 @@ interface ArticleReaderProps {
 
 type Status = 'loading' | 'ready' | 'error'
 
-const MAX_CONTENT_CHARS = 6000
+const MAX_CONTENT_CHARS = 12000
+const HEADER_LINES = 5   // top border + category + title + url + spacer
+const FOOTER_LINES = 2   // scroll indicator + bottom border
 
 export function ArticleReader({ article, onClose }: ArticleReaderProps) {
   const { accent } = useTheme()
+  const { columns, rows } = useWindowSize()
   const [status, setStatus] = useState<Status>('loading')
   const [content, setContent] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -40,7 +45,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
           setStatus('error')
           return
         }
-        setContent(text.slice(0, MAX_CONTENT_CHARS))
+        setContent(text)
         setStatus('ready')
       })
       .catch((err: unknown) => {
@@ -53,28 +58,83 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
     return () => { cancelled = true }
   }, [article.url])
 
+  // Wrap content to fit the available width.
+  // Width accounts for the rounded border (2 chars) + paddingX (2 chars each side).
+  const innerWidth = Math.max(20, columns - 6)
+  const allLines = useMemo(() => {
+    if (status !== 'ready') return []
+    return wrapText(content, innerWidth)
+  }, [content, innerWidth, status])
+
+  const visibleHeight = Math.max(3, rows - HEADER_LINES - FOOTER_LINES)
+  const {
+    visibleLines,
+    isAtBottom,
+    handleUp,
+    handleDown,
+    resetScroll,
+  } = useScroll(allLines, { maxLines: visibleHeight })
+
+  useEffect(() => {
+    resetScroll()
+  }, [article.url, resetScroll])
+
   useInput((char, key) => {
     if (key.escape || char === 'q' || char === 'Q') {
       onClose()
       return
     }
+
+    if (status !== 'ready') return
+
+    // Vim-like + arrow nav
+    if (key.upArrow || char === 'k') {
+      handleUp()
+      return
+    }
+    if (key.downArrow || char === 'j') {
+      handleDown()
+      return
+    }
+    if (key.pageUp || char === 'b') {
+      for (let i = 0; i < Math.max(1, Math.floor(visibleHeight / 2)); i++) handleUp()
+      return
+    }
+    if (key.pageDown || char === ' ' || char === 'f') {
+      for (let i = 0; i < Math.max(1, Math.floor(visibleHeight / 2)); i++) handleDown()
+      return
+    }
+    if (char === 'g' || key.home) {
+      // Jump to top
+      while (!isAtBottom) handleDown()
+      return
+    }
+    if (char === 'G' || key.end) {
+      // Jump to bottom
+      for (let i = 0; i < 9999; i++) handleUp()
+      return
+    }
   })
 
+  const lineInfo = status === 'ready' && allLines.length > 0
+    ? `${allLines.length} líneas${isAtBottom ? ' · final' : ' · sigue para ver más'}`
+    : ''
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={accent} paddingX={1} flexGrow={1}>
-      <Box justifyContent="space-between" marginBottom={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={accent} paddingX={1} height={rows - 2}>
+      <Box justifyContent="space-between">
         <Text color={accent} bold>
           ┌─ {article.category} · {article.source}
         </Text>
-        <Text color="gray">[esc/q] cerrar</Text>
+        <Text color="gray">[esc] cerrar  [↑↓] scroll  [space] página</Text>
       </Box>
 
-      <Box marginBottom={1} flexDirection="column">
+      <Box flexDirection="column" marginY={1}>
         <Text color="white" bold>{article.title}</Text>
         <Text color="gray">{article.url}</Text>
       </Box>
 
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {status === 'loading' && (
           <Text color="gray">Cargando artículo…</Text>
         )}
@@ -82,8 +142,17 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
           <Text color="red">Error: {error}</Text>
         )}
         {status === 'ready' && (
-          <Text color="white">{content}</Text>
+          <Box flexDirection="column">
+            {visibleLines.map((line, i) => (
+              <Text key={i} color="white">{line || ' '}</Text>
+            ))}
+          </Box>
         )}
+      </Box>
+
+      <Box justifyContent="space-between">
+        <Text color="gray">{lineInfo}</Text>
+        <Text color="gray">artículo {article.position}</Text>
       </Box>
     </Box>
   )
