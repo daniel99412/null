@@ -17,6 +17,7 @@ import { CommandPalette } from './components/CommandPalette.js'
 import type { CommandItem } from './components/CommandPalette.js'
 import { SessionList } from './components/SessionList.js'
 import { ColorPicker } from './components/ColorPicker.js'
+import { FirstRunSetup } from './components/FirstRunSetup.js'
 import { ArticleReader, type DigestArticle } from './components/ArticleReader.js'
 import { ThemeProvider } from './context/ThemeContext.js'
 import {
@@ -33,7 +34,7 @@ import {
 } from '../memory/sessions.js'
 import type { Session } from '../memory/sessions.js'
 import { runCleanup } from '../memory/cleanup.js'
-import { loadConfig, DEFAULT_MODEL } from '../config/index.js'
+import { loadConfig, DEFAULT_MODEL, isFirstRun } from '../config/index.js'
 import { processQuery, processQueryWithReAct } from '../core/agent.js'
 
 const MODEL = loadConfig().model ?? DEFAULT_MODEL
@@ -759,7 +760,9 @@ export function runTUI(resumeSessionId?: string): void {
 
   const InnerApp = () => {
     const { exit } = useApp()
-    const [phase, setPhase] = useState<'splash' | 'chat'>('splash')
+    const [phase, setPhase] = useState<'setup' | 'splash' | 'chat'>(
+      () => (isFirstRun() ? 'setup' : 'splash'),
+    )
 
     const handleChatExit = useCallback((
       sessionId: string,
@@ -775,6 +778,14 @@ export function runTUI(resumeSessionId?: string): void {
       setPhase('chat')
       runCleanup().catch(() => {})
     }, [])
+
+    const handleSetupDone = useCallback(() => {
+      setPhase('splash')
+    }, [])
+
+    if (phase === 'setup') {
+      return <FirstRunSetup onDone={handleSetupDone} />
+    }
 
     if (phase === 'splash') {
       return <Splash onDone={handleSplashDone} />

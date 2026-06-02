@@ -39,6 +39,8 @@ export interface NullConfig {
   model?: string
   routerModel?: string
   ollamaUrl?: string
+  userName?: string
+  setupCompleted?: boolean
 }
 
 const DEFAULT_CONFIG: NullConfig = {
@@ -61,6 +63,8 @@ export function loadConfig(): NullConfig {
       model: parsed.model,
       routerModel: parsed.routerModel,
       ollamaUrl: parsed.ollamaUrl,
+      userName: parsed.userName,
+      setupCompleted: parsed.setupCompleted,
     }
   } catch {
     return { ...DEFAULT_CONFIG }
@@ -83,5 +87,29 @@ export function setAccentColor(color: AccentColor): void {
 export function setModel(model: string): void {
   const config = loadConfig()
   config.model = model
+  saveConfig(config)
+}
+
+/**
+ * Returns true if the user has not yet completed first-run setup.
+ * The setup is considered complete when either `setupCompleted` is true
+ * OR a `userName` has been saved.
+ */
+export function isFirstRun(): boolean {
+  const config = loadConfig()
+  return !config.setupCompleted && !config.userName
+}
+
+/**
+ * Persist first-run setup state. The accent color is also saved here
+ * so the chosen theme survives across runs.
+ */
+export function completeSetup(opts: { userName?: string; accentColor: AccentColor }): void {
+  const config = loadConfig()
+  if (opts.userName && opts.userName.trim()) {
+    config.userName = opts.userName.trim()
+  }
+  config.accentColor = opts.accentColor
+  config.setupCompleted = true
   saveConfig(config)
 }
