@@ -9,7 +9,7 @@
  *   - detectDateRange()    → correct DateRange for each keyword
  */
 
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   detectLeague,
   detectDateIntent,
@@ -44,9 +44,10 @@ describe('detectLeague', () => {
   it('serie a', () => expect(detectLeague('serie a italia')).toBe('ita.1'))
   it('champions league', () => expect(detectLeague('champions league última jornada')).toBe('uefa.champions'))
   it('mls', () => expect(detectLeague('mls standings')).toBe('usa.1'))
+  it('nfl', () => expect(detectLeague('cómo estuvo el juego de la nfl')).toBe('nfl'))
 
   // Unknown league
-  it('returns null for unknown sport', () => expect(detectLeague('cómo estuvo el juego de la nfl')).toBeNull())
+  it('returns null for unknown sport', () => expect(detectLeague('cómo estuvo el juego de pickleball')).toBeNull())
   it('returns null for no sport mention', () => expect(detectLeague('qué hora es')).toBeNull())
 })
 

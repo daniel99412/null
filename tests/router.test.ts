@@ -64,6 +64,8 @@ describe('router → none (heuristic)', () => {
     'qué es la edad media',
     'qué fue la conquista de México',
     'qué es la constitución',
+    'quién soy',
+    'que sabes de mí',
   ]
 
   for (const query of cases) {
