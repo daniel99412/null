@@ -478,6 +478,28 @@ export async function processQuery(
     }
   }
 
+  if (decision === 'mexicoNewsDigest') {
+    onStatus?.('Obteniendo noticias de México...')
+    try {
+      const { buildMexicoNewsDigest } = await import('../tools/mexico-news.js')
+      const digest = await buildMexicoNewsDigest(query)
+      return {
+        userContent: query,
+        searchContext: null,
+        statusMessage: 'Obteniendo noticias de México...',
+        directResponse: digest,
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return {
+        userContent: query,
+        searchContext: null,
+        statusMessage: 'Obteniendo noticias de México...',
+        directResponse: `No se pudo obtener el digest de noticias: ${msg}`,
+      }
+    }
+  }
+
   // decision === 'none' — answer directly from LLM knowledge (or via ReAct)
   return {
     userContent: query,

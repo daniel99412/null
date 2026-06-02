@@ -176,6 +176,55 @@ export function getDb(): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_espn_teams_canonical ON espn_teams(canonical);
     CREATE INDEX IF NOT EXISTS idx_espn_teams_league ON espn_teams(league_slug);
+
+    -- ── Mexico News Digest tables ─────────────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS news_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      url TEXT NOT NULL,
+      feed_url TEXT,
+      bias_base REAL NOT NULL,
+      reliability REAL NOT NULL,
+      type TEXT NOT NULL,
+      scope_json TEXT NOT NULL,
+      anchor INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_checked_at TEXT,
+      last_error TEXT,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      unavailable_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS news_articles_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id INTEGER NOT NULL,
+      url TEXT NOT NULL,
+      title TEXT NOT NULL,
+      snippet TEXT,
+      published_at TEXT,
+      fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      normalized_title TEXT,
+      content_hash TEXT,
+      category TEXT,
+      raw_json TEXT,
+      UNIQUE(source_id, url)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_news_articles_source ON news_articles_cache(source_id);
+    CREATE INDEX IF NOT EXISTS idx_news_articles_published ON news_articles_cache(published_at);
+
+    CREATE TABLE IF NOT EXISTS news_digest_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL,
+      query TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT NOT NULL,
+      UNIQUE(scope, query)
+    );
   `)
 
   // ── Schema migrations ──────────────────────────────────────────────────────
@@ -193,6 +242,10 @@ export function getDb(): Database.Database {
 
   seedEspnLeagues(db)
   seedEspnTeams(db)
+
+  // ── Seed news sources ──────────────────────────────────────────────────────
+
+  seedNewsSources(db)
 
   // ── Migrate user_preferences → memories ───────────────────────────────────
 
@@ -478,4 +531,227 @@ function migratePreferences(database: Database.Database): void {
   })
 
   migrate()
+}
+
+// ── News sources seed ─────────────────────────────────────────────────────────
+//
+// INSERT OR IGNORE — safe on every startup. Existing rows are never overwritten.
+
+interface NewsSourceSeed {
+  name: string
+  url: string
+  feed_url: string | null
+  bias_base: number
+  reliability: number
+  type: string
+  scope_json: string
+  anchor: number
+}
+
+const NEWS_SOURCES_SEED: NewsSourceSeed[] = [
+  // ── Anclas (wire services) ────────────────────────────────────────────────
+  {
+    name: 'Reuters México',
+    url: 'https://www.reuters.com/world/americas/mexico',
+    feed_url: 'https://feeds.reuters.com/reuters/MXdomesticNews',
+    bias_base: 5.0, reliability: 0.95, type: 'agency',
+    scope_json: JSON.stringify(['mexico', 'latin-america', 'world', 'mexico-impact']),
+    anchor: 1,
+  },
+  {
+    name: 'AP México',
+    url: 'https://apnews.com/hub/mexico',
+    feed_url: 'https://rsshub.app/apnews/topics/mexico',
+    bias_base: 5.0, reliability: 0.95, type: 'agency',
+    scope_json: JSON.stringify(['mexico', 'latin-america', 'world', 'mexico-impact']),
+    anchor: 1,
+  },
+  {
+    name: 'EFE México',
+    url: 'https://efemx.com',
+    feed_url: 'https://www.efe.com/efe/america/mexico/rss',
+    bias_base: 4.8, reliability: 0.93, type: 'agency',
+    scope_json: JSON.stringify(['mexico', 'latin-america', 'world', 'mexico-impact']),
+    anchor: 1,
+  },
+  {
+    name: 'AFP',
+    url: 'https://www.afpbb.com',
+    feed_url: null,
+    bias_base: 5.0, reliability: 0.93, type: 'agency',
+    scope_json: JSON.stringify(['mexico', 'world', 'mexico-impact']),
+    anchor: 1,
+  },
+  // ── Cobertura nacional ────────────────────────────────────────────────────
+  {
+    name: 'Quadratín México',
+    url: 'https://mexico.quadratin.com.mx',
+    feed_url: 'https://mexico.quadratin.com.mx/feed/',
+    bias_base: 5.0, reliability: 0.82, type: 'mexican-wire',
+    scope_json: JSON.stringify(['mexico', 'states', 'politics']),
+    anchor: 0,
+  },
+  {
+    name: 'OEM Informex',
+    url: 'https://www.oem.com.mx',
+    feed_url: 'https://www.oem.com.mx/feed/',
+    bias_base: 5.5, reliability: 0.78, type: 'mexican-wire',
+    scope_json: JSON.stringify(['mexico', 'states']),
+    anchor: 0,
+  },
+  // ── Centro ────────────────────────────────────────────────────────────────
+  {
+    name: 'Animal Político',
+    url: 'https://animalpolitico.com',
+    feed_url: 'https://animalpolitico.com/feed/',
+    bias_base: 4.0, reliability: 0.88, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'security']),
+    anchor: 0,
+  },
+  {
+    name: 'El Universal',
+    url: 'https://www.eluniversal.com.mx',
+    feed_url: 'https://www.eluniversal.com.mx/rss.xml',
+    bias_base: 5.5, reliability: 0.84, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'economy', 'security']),
+    anchor: 0,
+  },
+  {
+    name: 'Milenio',
+    url: 'https://www.milenio.com',
+    feed_url: 'https://www.milenio.com/rss',
+    bias_base: 5.5, reliability: 0.82, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'business', 'security']),
+    anchor: 0,
+  },
+  {
+    name: 'Expansión Política',
+    url: 'https://expansion.mx/politica',
+    feed_url: 'https://expansion.mx/rss/politica.xml',
+    bias_base: 5.0, reliability: 0.83, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'economy', 'business']),
+    anchor: 0,
+  },
+  {
+    name: 'La Silla Rota',
+    url: 'https://lasillarota.com',
+    feed_url: 'https://lasillarota.com/feed/',
+    bias_base: 4.5, reliability: 0.79, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'security']),
+    anchor: 0,
+  },
+  {
+    name: 'Excélsior',
+    url: 'https://www.excelsior.com.mx',
+    feed_url: 'https://www.excelsior.com.mx/rss.xml',
+    bias_base: 5.5, reliability: 0.81, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'economy', 'security']),
+    anchor: 0,
+  },
+  // ── Economía ──────────────────────────────────────────────────────────────
+  {
+    name: 'El Financiero',
+    url: 'https://www.elfinanciero.com.mx',
+    feed_url: 'https://www.elfinanciero.com.mx/rss/feed.xml',
+    bias_base: 6.0, reliability: 0.86, type: 'business-news',
+    scope_json: JSON.stringify(['mexico', 'economy', 'business', 'mexico-impact']),
+    anchor: 0,
+  },
+  {
+    name: 'El Economista',
+    url: 'https://www.eleconomista.com.mx',
+    feed_url: 'https://www.eleconomista.com.mx/rss/portada.xml',
+    bias_base: 6.0, reliability: 0.86, type: 'business-news',
+    scope_json: JSON.stringify(['mexico', 'economy', 'business']),
+    anchor: 0,
+  },
+  {
+    name: 'Forbes México',
+    url: 'https://www.forbes.com.mx',
+    feed_url: 'https://www.forbes.com.mx/feed/',
+    bias_base: 6.5, reliability: 0.83, type: 'business-news',
+    scope_json: JSON.stringify(['mexico', 'business', 'economy']),
+    anchor: 0,
+  },
+  // ── Izquierda ─────────────────────────────────────────────────────────────
+  {
+    name: 'La Jornada',
+    url: 'https://www.jornada.com.mx',
+    feed_url: 'https://www.jornada.com.mx/rss/edicion.xml',
+    bias_base: 2.5, reliability: 0.82, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'security', 'economy']),
+    anchor: 0,
+  },
+  {
+    name: 'SinEmbargo',
+    url: 'https://www.sinembargo.mx',
+    feed_url: 'https://www.sinembargo.mx/feed/',
+    bias_base: 2.0, reliability: 0.78, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'security']),
+    anchor: 0,
+  },
+  {
+    name: 'Proceso',
+    url: 'https://www.proceso.com.mx',
+    feed_url: 'https://www.proceso.com.mx/rss/',
+    bias_base: 3.0, reliability: 0.84, type: 'investigative',
+    scope_json: JSON.stringify(['mexico', 'politics', 'security', 'economy']),
+    anchor: 0,
+  },
+  // ── Derecha ───────────────────────────────────────────────────────────────
+  {
+    name: 'Reforma',
+    url: 'https://www.reforma.com',
+    feed_url: null,
+    bias_base: 7.0, reliability: 0.88, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'economy', 'security']),
+    anchor: 0,
+  },
+  {
+    name: 'Latinus',
+    url: 'https://latinus.us',
+    feed_url: 'https://latinus.us/feed/',
+    bias_base: 7.0, reliability: 0.80, type: 'national-news',
+    scope_json: JSON.stringify(['mexico', 'politics', 'security']),
+    anchor: 0,
+  },
+  // ── Internacionales ───────────────────────────────────────────────────────
+  {
+    name: 'BBC Mundo',
+    url: 'https://www.bbc.com/mundo',
+    feed_url: 'https://feeds.bbci.co.uk/mundo/rss.xml',
+    bias_base: 5.0, reliability: 0.92, type: 'international-news',
+    scope_json: JSON.stringify(['mexico-impact', 'latin-america', 'world']),
+    anchor: 0,
+  },
+  {
+    name: 'CNN en Español',
+    url: 'https://cnnespanol.cnn.com',
+    feed_url: 'https://cnnespanol.cnn.com/feed/',
+    bias_base: 4.5, reliability: 0.88, type: 'international-news',
+    scope_json: JSON.stringify(['mexico-impact', 'latin-america', 'world']),
+    anchor: 0,
+  },
+  {
+    name: 'El País México',
+    url: 'https://elpais.com/mexico',
+    feed_url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/mexico/portada',
+    bias_base: 4.5, reliability: 0.89, type: 'international-news',
+    scope_json: JSON.stringify(['mexico', 'mexico-impact', 'latin-america']),
+    anchor: 0,
+  },
+]
+
+function seedNewsSources(database: Database.Database): void {
+  const insert = database.prepare(`
+    INSERT OR IGNORE INTO news_sources
+      (name, url, feed_url, bias_base, reliability, type, scope_json, anchor)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const insertMany = database.transaction((rows: NewsSourceSeed[]) => {
+    for (const row of rows) {
+      insert.run(row.name, row.url, row.feed_url, row.bias_base, row.reliability, row.type, row.scope_json, row.anchor)
+    }
+  })
+  insertMany(NEWS_SOURCES_SEED)
 }
