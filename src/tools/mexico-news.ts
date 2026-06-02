@@ -67,6 +67,44 @@ function buildNeutralSummary(story: NewsStory): string {
   return snippets[0].slice(0, 220).replace(/\s+$/, '') + (snippets[0].length > 220 ? '…' : '')
 }
 
+// Wrap text to a max line width, breaking on word boundaries.
+// Prefixes each line with `prefix` so box-drawing characters stay aligned.
+function wrapWithPrefix(text: string, prefix: string, maxWidth: number): string[] {
+  // Normalize whitespace: collapse runs to single space
+  const clean = text.replace(/\s+/g, ' ').trim()
+  const contentWidth = maxWidth - prefix.length
+  if (contentWidth <= 0) return [`${prefix}${clean}`]
+
+  const words = clean.split(' ')
+  const lines: string[] = []
+  let current = ''
+
+  for (const word of words) {
+    if (current.length === 0) {
+      // First word on this line
+      if (word.length > contentWidth) {
+        // Word longer than line — hard break
+        let remaining = word
+        while (remaining.length > contentWidth) {
+          lines.push(`${prefix}${remaining.slice(0, contentWidth)}`)
+          remaining = remaining.slice(contentWidth)
+        }
+        current = remaining
+      } else {
+        current = word
+      }
+    } else if (current.length + 1 + word.length <= contentWidth) {
+      current = `${current} ${word}`
+    } else {
+      lines.push(`${prefix}${current}`)
+      current = word
+    }
+  }
+  if (current.length > 0) lines.push(`${prefix}${current}`)
+
+  return lines
+}
+
 function formatCard(story: NewsStory, index: number): string {
   const bias = analyzeBias(story)
   const sourceList = story.sources.slice(0, 5).join(' · ')
@@ -77,20 +115,25 @@ function formatCard(story: NewsStory, index: number): string {
     ? '1 medio'
     : `${story.articles.length} medios`
 
-  const lines = [
-    `┌─ ${story.category} · ${sourceList}${extra}`,
-    `│`,
-    `│ Titular: ${story.title}`,
-    `│`,
-    `│ Resumen: ${summary}`,
-    `│`,
-    `│ Cobertura: ${coverage}`,
-    `│ Recencia: ${recency}`,
-    `│`,
-    `│ Inclinación de cobertura: ${bias.biasLabel} (${bias.finalBias.toFixed(1)})`,
-    `│ Polarización: ${bias.polarizationLabel}`,
-    `└`,
-  ]
+  // Card interior width (between │ characters). Tuned for ~80-col terminals.
+  const CONTENT_WIDTH = 64
+
+  const titularLines = wrapWithPrefix(story.title, '│ ', CONTENT_WIDTH)
+  const resumenLines = wrapWithPrefix(`Resumen: ${summary}`, '│ ', CONTENT_WIDTH)
+
+  const lines: string[] = []
+  lines.push(`┌─ ${story.category} · ${sourceList}${extra}`)
+  lines.push('│')
+  for (const ln of titularLines) lines.push(ln)
+  lines.push('│')
+  for (const ln of resumenLines) lines.push(ln)
+  lines.push('│')
+  lines.push(`│ Cobertura: ${coverage}`)
+  lines.push(`│ Recencia: ${recency}`)
+  lines.push('│')
+  lines.push(`│ Inclinación de cobertura: ${bias.biasLabel} (${bias.finalBias.toFixed(1)})`)
+  lines.push(`│ Polarización: ${bias.polarizationLabel}`)
+  lines.push('└')
 
   return `${index + 1}. ${lines.join('\n')}`
 }
