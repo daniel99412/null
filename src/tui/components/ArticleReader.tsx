@@ -129,8 +129,6 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
       flexDirection="column"
       alignItems="center"
       justifyContent="center"
-      width={columns}
-      height={rows}
     >
       <Box
         flexDirection="column"
@@ -139,6 +137,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
         borderStyle="round"
         borderColor={accent}
         paddingX={1}
+        backgroundColor="black"
       >
         <Box justifyContent="space-between">
           <Text color={accent} bold>

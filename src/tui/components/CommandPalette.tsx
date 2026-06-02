@@ -85,8 +85,6 @@ export function CommandPalette({ commands, onSelect, onClose }: CommandPalettePr
       flexDirection="column"
       alignItems="center"
       justifyContent="center"
-      height={rows}
-      width={cols}
     >
       <Box
         flexDirection="column"
@@ -94,6 +92,7 @@ export function CommandPalette({ commands, onSelect, onClose }: CommandPalettePr
         borderStyle="round"
         borderColor={accent}
         paddingX={1}
+        backgroundColor="black"
       >
         {/* Search input */}
         <Box marginBottom={1}>

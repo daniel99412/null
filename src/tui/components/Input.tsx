@@ -7,6 +7,7 @@ interface InputProps {
   cursorVisible: boolean
   isLoading: boolean
   placeholder?: string
+  dimmed?: boolean
 }
 
 /** Calculate how many terminal rows a string occupies given a max column width. */
@@ -22,6 +23,7 @@ export function Input({
   cursorVisible,
   isLoading,
   placeholder = 'Ask anything...',
+  dimmed = false,
 }: InputProps) {
   const { accent } = useTheme()
   const cols = process.stdout?.columns || 80
@@ -39,11 +41,11 @@ export function Input({
       height={boxHeight}
       width={cols - 2}
     >
-      <Text color={accent} bold>{'> '}</Text>
+      <Text color={accent} bold dimColor={dimmed}>{'> '}</Text>
       {value.length === 0 && !isLoading ? (
-        <Text color="gray">{placeholder}</Text>
+        <Text color="gray" dimColor={dimmed}>{placeholder}</Text>
       ) : (
-        <Text color="white">
+        <Text color="white" dimColor={dimmed}>
           {value}
           {cursorVisible && !isLoading ? (
             <Text color={accent} inverse>{' '}</Text>

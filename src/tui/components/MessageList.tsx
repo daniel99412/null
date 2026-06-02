@@ -16,6 +16,7 @@ interface MessageListProps {
   visibleStart: number
   visibleCount: number
   terminalWidth: number
+  dimmed?: boolean
 }
 
 /**
@@ -248,6 +249,7 @@ export function MessageList({
   visibleStart,
   visibleCount,
   terminalWidth,
+  dimmed = false,
 }: MessageListProps) {
   const { accent } = useTheme()
   // 4 = paddingX(1) * 2 + bar('┃ ' = 2) + some margin
@@ -270,16 +272,20 @@ export function MessageList({
         if (line.isLabel) {
           return (
             <Box key={start + i} flexDirection="row">
-              <Text color={barColor}>{'┃ '}</Text>
-              <Text color={barColor} bold>{line.text}</Text>
+              <Text color={barColor} dimColor={dimmed}>{'┃ '}</Text>
+              <Text color={barColor} bold dimColor={dimmed}>{line.text}</Text>
             </Box>
           )
         }
 
         return (
           <Box key={start + i} flexDirection="row">
-            <Text color={barColor}>{'┃ '}</Text>
-            <Text color={line.role === 'recall' ? 'yellowBright' : 'white'} wrap="wrap">
+            <Text color={barColor} dimColor={dimmed}>{'┃ '}</Text>
+            <Text
+              color={line.role === 'recall' ? 'yellowBright' : 'white'}
+              dimColor={dimmed}
+              wrap="wrap"
+            >
               {line.text}
             </Text>
           </Box>

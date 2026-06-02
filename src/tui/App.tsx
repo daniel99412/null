@@ -630,17 +630,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     }
   })
 
-  // Render overlay on top of chat
-  if (overlay === 'command-palette') {
-    return (
-      <CommandPalette
-        commands={COMMANDS}
-        onSelect={handleCommandSelect}
-        onClose={() => setOverlay('none')}
-      />
-    )
-  }
-
+  // Full-screen overlays that replace the chat
   if (overlay === 'sessions') {
     return (
       <SessionList
@@ -690,24 +680,19 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     )
   }
 
-  if (overlay === 'article-reader' && readingArticle) {
-    return (
-      <ArticleReader
-        article={readingArticle}
-        onClose={() => {
-          setOverlay('none')
-          setReadingArticle(null)
-        }}
-      />
-    )
-  }
+  // Floating modal overlays: command palette and article reader render ON TOP
+  // of the chat (position="absolute") with a backdrop, so the chat is hidden
+  // behind a scrim while the modal is in focus.
+  const isModalOpen: boolean =
+    overlay === 'command-palette' ||
+    (overlay === 'article-reader' && readingArticle !== null)
 
   return (
     <Box flexDirection="column" height={terminalHeight}>
-      <Header model={MODEL} sessionId={session.id} />
+      <Header model={MODEL} sessionId={session.id} dimmed={isModalOpen} />
 
       <Box height={1} paddingX={1}>
-        <Text color="gray">{'─'.repeat(Math.max(0, terminalWidth - 4))}</Text>
+        <Text color="gray" dimColor={isModalOpen}>{'─'.repeat(Math.max(0, terminalWidth - 4))}</Text>
       </Box>
 
       <MessageList
@@ -715,12 +700,14 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         visibleStart={scrollOffset}
         visibleCount={contentHeight}
         terminalWidth={terminalWidth}
+        dimmed={isModalOpen}
       />
 
       <Input
         value={input}
         cursorVisible={cursorVisible}
         isLoading={isLoading}
+        dimmed={isModalOpen}
       />
 
       <Footer
@@ -730,7 +717,48 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         hasMoreLines={hasMoreLines}
         scrollOffset={scrollOffset}
         digestCount={digestArticles.length}
+        dimmed={isModalOpen}
       />
+
+      {/* Floating modal overlay — command palette and article reader */}
+      {isModalOpen && (
+        <Box
+          position="absolute"
+          top={0}
+          left={0}
+          width={terminalWidth}
+          height={terminalHeight}
+          flexDirection="column"
+        >
+          {/* Modal content centered on top — the chat behind is dimmed via the dimmed props above */}
+          <Box
+            position="absolute"
+            top={0}
+            left={0}
+            width={terminalWidth}
+            height={terminalHeight}
+            alignItems="center"
+            justifyContent="center"
+          >
+            {overlay === 'command-palette' && (
+              <CommandPalette
+                commands={COMMANDS}
+                onSelect={handleCommandSelect}
+                onClose={() => setOverlay('none')}
+              />
+            )}
+            {overlay === 'article-reader' && readingArticle && (
+              <ArticleReader
+                article={readingArticle}
+                onClose={() => {
+                  setOverlay('none')
+                  setReadingArticle(null)
+                }}
+              />
+            )}
+          </Box>
+        </Box>
+      )}
     </Box>
   )
 }
