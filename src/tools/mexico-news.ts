@@ -40,31 +40,37 @@ function setDigestCache(scope: string, query: string, result: string): void {
 
 // ─── Formatting ───────────────────────────────────────────────────────────────
 
-function formatRecency(minutesAgo: number): string {
-  if (minutesAgo < 0) return 'hora desconocida'
-  if (minutesAgo < 60) return `hace ${minutesAgo} minutos`
+function formatRecency(minutesAgo: number, publishedAt: string): string {
+  if (minutesAgo < 0) return 'fecha desconocida'
+  const timeStr = publishedAt
+    ? new Date(publishedAt).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+    : ''
+  if (minutesAgo < 60) return timeStr ? `hace ${minutesAgo} min (${timeStr})` : `hace ${minutesAgo} min`
   const h = Math.round(minutesAgo / 60)
-  if (h === 1) return 'hace 1 hora'
-  if (h < 24) return `hace ${h} horas`
+  if (h === 1) return timeStr ? `hace 1 hora (${timeStr})` : 'hace 1 hora'
+  if (h < 24) return timeStr ? `hace ${h} horas (${timeStr})` : `hace ${h} horas`
   const d = Math.round(h / 24)
   return d === 1 ? 'hace 1 día' : `hace ${d} días`
 }
 
 function buildNeutralSummary(story: NewsStory): string {
-  // Collect unique snippets from the top 3 most reliable articles
+  // Pick the LONGEST snippet among the top 3 most reliable articles.
+  // Longer snippets usually have more context, even if from a slightly
+  // less-reliable source. Falls back to title when snippets are too short.
   const sorted = [...story.articles].sort((a, b) => b.reliability - a.reliability)
-  const snippets = sorted
+  const candidates = sorted
     .slice(0, 3)
     .map((a) => a.snippet)
-    .filter((s) => s && s.length > 20)
+    .filter((s) => s && s.length >= 20)
 
-  if (snippets.length === 0) {
-    return 'Sin resumen disponible.'
+  if (candidates.length === 0) {
+    // No usable snippet — use the title as the summary instead.
+    return story.title
   }
 
-  // Return the best snippet (from most reliable source)
-  // Truncate to ~200 chars to keep cards tight
-  return snippets[0].slice(0, 220).replace(/\s+$/, '') + (snippets[0].length > 220 ? '…' : '')
+  // Pick the longest candidate
+  const best = candidates.reduce((a, b) => (b.length > a.length ? b : a))
+  return best.slice(0, 220).replace(/\s+$/, '') + (best.length > 220 ? '…' : '')
 }
 
 // Wrap text to a max line width, breaking on word boundaries.
@@ -110,7 +116,7 @@ function formatCard(story: NewsStory): string {
   const sourceList = story.sources.slice(0, 5).join(' · ')
   const extra = story.sources.length > 5 ? ` +${story.sources.length - 5}` : ''
   const summary = buildNeutralSummary(story)
-  const recency = formatRecency(story.minutesAgo)
+  const recency = formatRecency(story.minutesAgo, story.publishedAt)
   const coverage = story.articles.length === 1
     ? '1 medio'
     : `${story.articles.length} medios`
@@ -173,7 +179,7 @@ function formatDigest(stories: NewsStory[], fetchedAt: Date): string {
 export async function buildMexicoNewsDigest(query = 'mexico'): Promise<string> {
   const scope = 'mexico'
   // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
-  const DIGEST_FORMAT_VERSION = 'v2'
+  const DIGEST_FORMAT_VERSION = 'v3'
   const cacheKey = `${DIGEST_FORMAT_VERSION}:${query.toLowerCase().trim().slice(0, 80)}`
 
   // Check digest cache first
