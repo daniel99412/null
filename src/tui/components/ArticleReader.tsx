@@ -60,13 +60,17 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
 
   // Wrap content to fit the available width.
   // Width accounts for the rounded border (2 chars) + paddingX (2 chars each side).
-  const innerWidth = Math.max(20, columns - 6)
+  // Window dimensions — leave some breathing room around the modal.
+  const windowWidth = Math.min(120, Math.max(60, Math.floor(columns * 0.85)))
+  const windowHeight = Math.max(12, Math.floor(rows * 0.85))
+  const innerWidth = Math.max(20, windowWidth - 6) // border (2) + paddingX (2 each side)
+
   const allLines = useMemo(() => {
     if (status !== 'ready') return []
     return wrapText(content, innerWidth)
   }, [content, innerWidth, status])
 
-  const visibleHeight = Math.max(3, rows - HEADER_LINES - FOOTER_LINES)
+  const visibleHeight = Math.max(3, windowHeight - HEADER_LINES - FOOTER_LINES)
   const {
     visibleLines,
     isAtBottom,
@@ -121,38 +125,53 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
     : ''
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={accent} paddingX={1} height={rows - 2}>
-      <Box justifyContent="space-between">
-        <Text color={accent} bold>
-          ┌─ {article.category} · {article.source}
-        </Text>
-        <Text color="gray">[esc] cerrar  [↑↓] scroll  [space] página</Text>
-      </Box>
+    <Box
+      flexDirection="column"
+      alignItems="center"
+      justifyContent="center"
+      width={columns}
+      height={rows}
+    >
+      <Box
+        flexDirection="column"
+        width={windowWidth}
+        height={windowHeight}
+        borderStyle="round"
+        borderColor={accent}
+        paddingX={1}
+      >
+        <Box justifyContent="space-between">
+          <Text color={accent} bold>
+            {article.category} · {article.source}
+          </Text>
+          <Text color="gray">[esc] cerrar  [↑↓] scroll  [space] página</Text>
+        </Box>
 
-      <Box flexDirection="column" marginY={1}>
-        <Text color="white" bold>{article.title}</Text>
-        <Text color="gray">{article.url}</Text>
-      </Box>
+        <Box flexDirection="column" marginY={1}>
+          <Text color="white" bold wrap="wrap">{article.title}</Text>
+          <Text color="gray" wrap="truncate-end">{article.url}</Text>
+        </Box>
 
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {status === 'loading' && (
-          <Text color="gray">Cargando artículo…</Text>
-        )}
-        {status === 'error' && (
-          <Text color="red">Error: {error}</Text>
-        )}
-        {status === 'ready' && (
-          <Box flexDirection="column">
-            {visibleLines.map((line, i) => (
-              <Text key={i} color="white">{line || ' '}</Text>
-            ))}
-          </Box>
-        )}
-      </Box>
+        <Box flexDirection="column" flexGrow={1} overflow="hidden">
+          {status === 'loading' && (
+            <Text color="gray">Cargando artículo…</Text>
+          )}
+          {status === 'error' && (
+            <Text color="red">Error: {error}</Text>
+          )}
+          {status === 'ready' && (
+            <Box flexDirection="column">
+              {visibleLines.map((line, i) => (
+                <Text key={i} color="white">{line || ' '}</Text>
+              ))}
+            </Box>
+          )}
+        </Box>
 
-      <Box justifyContent="space-between">
-        <Text color="gray">{lineInfo}</Text>
-        <Text color="gray">artículo {article.position}</Text>
+        <Box justifyContent="space-between">
+          <Text color="gray">{lineInfo}</Text>
+          <Text color="gray">artículo {article.position}</Text>
+        </Box>
       </Box>
     </Box>
   )
