@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react'
 import { Box, Text, useInput } from 'ink'
-import { listSessions, deleteSession } from '../../memory/sessions.js'
+import { listSessions } from '../../memory/sessions.js'
 import type { Session } from '../../memory/sessions.js'
 import { useTheme } from '../context/ThemeContext.js'
 
 interface SessionListProps {
   onSelect: (sessionId: string) => void
+  onNewSession: () => void
+  onDeleteSession: (sessionId: string) => void
+  onDeleteAll: () => void
   onClose: () => void
   currentSessionId: string
 }
@@ -30,11 +33,20 @@ function truncate(str: string, max: number): string {
   return str.slice(0, max - 3) + '...'
 }
 
-export function SessionList({ onSelect, onClose, currentSessionId }: SessionListProps) {
+export function SessionList({
+  onSelect,
+  onNewSession,
+  onDeleteSession,
+  onDeleteAll,
+  onClose,
+  currentSessionId,
+}: SessionListProps) {
   const { accent } = useTheme()
-  const [sessions, setSessions] = useState<Session[]>(() => listSessions(20))
+  const [refreshKey, setRefreshKey] = useState(0)
+  const sessions = useMemo(() => listSessions(20), [refreshKey])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [filter, setFilter] = useState('')
+  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null)
 
   const filtered = useMemo(() => {
     if (!filter) return sessions
@@ -53,6 +65,10 @@ export function SessionList({ onSelect, onClose, currentSessionId }: SessionList
 
   useInput((char, key) => {
     if (key.escape) {
+      if (pendingDeleteIndex !== null) {
+        setPendingDeleteIndex(null)
+        return
+      }
       onClose()
       return
     }
@@ -66,22 +82,47 @@ export function SessionList({ onSelect, onClose, currentSessionId }: SessionList
     }
 
     if (key.upArrow) {
-      setSelectedIndex((i) => Math.max(0, i - 1))
+      setSelectedIndex((i) => {
+        const next = Math.max(0, i - 1)
+        if (next !== i) setPendingDeleteIndex(null)
+        return next
+      })
       return
     }
 
     if (key.downArrow) {
-      setSelectedIndex((i) => Math.min(filtered.length - 1, i + 1))
+      setSelectedIndex((i) => {
+        const next = Math.min(filtered.length - 1, i + 1)
+        if (next !== i) setPendingDeleteIndex(null)
+        return next
+      })
+      return
+    }
+
+    if (key.ctrl && char === 'n') {
+      onNewSession()
       return
     }
 
     if (key.delete || (key.ctrl && char === 'd')) {
       const session = filtered[selectedIndex]
-      if (session && session.id !== currentSessionId) {
-        deleteSession(session.id)
-        setSessions(listSessions(20))
-        setSelectedIndex((i) => Math.max(0, i - 1))
+      if (session) {
+        if (pendingDeleteIndex === selectedIndex) {
+          // Second press — confirm deletion
+          setPendingDeleteIndex(null)
+          onDeleteSession(session.id)
+          setRefreshKey((k) => k + 1)
+          setSelectedIndex((i) => Math.max(0, i - 1))
+        } else {
+          // First press — ask for confirmation
+          setPendingDeleteIndex(selectedIndex)
+        }
       }
+      return
+    }
+
+    if (key.ctrl && char === 'x') {
+      onDeleteAll()
       return
     }
 
@@ -184,7 +225,11 @@ export function SessionList({ onSelect, onClose, currentSessionId }: SessionList
           <Text color="gray">{'─'.repeat(paletteWidth - 4)}</Text>
         </Box>
         <Box justifyContent="space-between">
-          <Text color="gray">enter resume  ctrl+d delete  esc back</Text>
+          {pendingDeleteIndex === selectedIndex ? (
+            <Text color="red" bold>press ctrl+d again to confirm delete  esc cancel</Text>
+          ) : (
+            <Text color="gray">enter resume  ctrl+n new  ctrl+d delete  ctrl+x delete all  esc back</Text>
+          )}
         </Box>
       </Box>
     </Box>

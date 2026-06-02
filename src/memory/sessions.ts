@@ -101,7 +101,19 @@ export function deleteSession(id: string): void {
   const db = getDb()
   db.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
   db.prepare('DELETE FROM session_summaries WHERE session_id = ?').run(id)
+  db.prepare('UPDATE memory_events SET session_id = NULL WHERE session_id = ?').run(id)
   db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+}
+
+export function deleteAllSessions(): void {
+  const db = getDb()
+  const deleteAll = db.transaction(() => {
+    db.prepare('DELETE FROM messages').run()
+    db.prepare('DELETE FROM session_summaries').run()
+    db.prepare('UPDATE memory_events SET session_id = NULL').run()
+    db.prepare('DELETE FROM sessions').run()
+  })
+  deleteAll()
 }
 
 /**

@@ -26,6 +26,8 @@ import {
   updateSessionTitle,
   getSummary,
   reactivateSession,
+  deleteSession,
+  deleteAllSessions,
   closeDb,
 } from '../memory/sessions.js'
 import type { Session } from '../memory/sessions.js'
@@ -37,18 +39,71 @@ const MODEL = loadConfig().model ?? DEFAULT_MODEL
 
 const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
-  { id: 'new-session', label: 'New Session', description: 'Start a fresh conversation', shortcut: '' },
-  { id: 'search', label: 'Search Web', description: 'Search the web and ask about the results', shortcut: '/search' },
   { id: 'theme', label: 'Theme', description: 'Change the accent color of the UI', shortcut: '' },
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
-type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker'
+type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all'
 
 interface ChatProps {
   resumeSessionId?: string
   onExit: (sessionId: string, sessionDate: string, hasMessages: boolean) => void
+}
+
+interface ConfirmDialogProps {
+  title: string
+  message: string
+  confirmLabel: string
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: ConfirmDialogProps) {
+  useInput((char, key) => {
+    if (key.escape || char?.toLowerCase() === 'n') {
+      onCancel()
+      return
+    }
+
+    if (key.return || char?.toLowerCase() === 'y') {
+      onConfirm()
+    }
+  })
+
+  const cols = process.stdout?.columns || 80
+  const rows = process.stdout?.rows || 24
+  const width = Math.min(64, cols - 4)
+
+  return (
+    <Box
+      flexDirection="column"
+      alignItems="center"
+      justifyContent="center"
+      height={rows}
+      width={cols}
+    >
+      <Box
+        flexDirection="column"
+        width={width}
+        borderStyle="round"
+        borderColor="red"
+        paddingX={1}
+      >
+        <Box marginBottom={1}>
+          <Text color="red" bold>{title}</Text>
+        </Box>
+        <Box marginBottom={1}>
+          <Text color="white">{message}</Text>
+        </Box>
+        <Box>
+          <Text color="gray">enter/y </Text>
+          <Text color="red">{confirmLabel}</Text>
+          <Text color="gray">  n/esc cancel</Text>
+        </Box>
+      </Box>
+    </Box>
+  )
 }
 
 function Chat({ resumeSessionId, onExit }: ChatProps) {
@@ -82,6 +137,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   })
   const [scrollOffset, setScrollOffset] = useState(0)
   const [overlay, setOverlay] = useState<Overlay>('none')
+  const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
   const messageCountRef = useRef(0)
 
   // Load existing messages when resuming a session
@@ -138,6 +194,48 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     setOverlay('none')
   }, [])
 
+  const replaceWithNewSession = useCallback(() => {
+    const newSession = createSession()
+    setSession(newSession)
+    updateMessages([])
+    setScrollOffset(0)
+    messageCountRef.current = 0
+  }, [updateMessages])
+
+  const handleRequestDeleteSession = useCallback((sessionId: string) => {
+    const isCurrent = sessionId === session.id
+    deleteSession(sessionId)
+    if (isCurrent) {
+      replaceWithNewSession()
+    }
+    setOverlay('sessions')
+  }, [session.id, replaceWithNewSession])
+
+  const handleConfirmDeleteSession = useCallback(() => {
+    if (!pendingDeleteSessionId) {
+      setOverlay('sessions')
+      return
+    }
+
+    const isCurrent = pendingDeleteSessionId === session.id
+    deleteSession(pendingDeleteSessionId)
+    setPendingDeleteSessionId(null)
+
+    if (isCurrent) {
+      replaceWithNewSession()
+      setOverlay('none')
+      return
+    }
+
+    setOverlay('sessions')
+  }, [pendingDeleteSessionId, session.id, replaceWithNewSession])
+
+  const handleDeleteAllSessions = useCallback(() => {
+    deleteAllSessions()
+    replaceWithNewSession()
+    setOverlay('none')
+  }, [replaceWithNewSession])
+
   const handleResumeSession = useCallback((sessionId: string) => {
     if (sessionId === session.id) {
       setOverlay('none')
@@ -183,14 +281,6 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       case 'sessions':
         setOverlay('sessions')
         break
-      case 'new-session':
-        handleNewSession()
-        break
-      case 'search':
-        setOverlay('none')
-        // Pre-fill input with /search prefix
-        setInput('/search ')
-        break
       case 'clear':
         updateMessages([])
         setScrollOffset(0)
@@ -230,7 +320,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
     if (key.return) {
       if (!input.trim()) return
-      if (input.trim().toLowerCase() === 'exit') {
+      if (input.trim().toLowerCase() === 'exit' || input.trim().toLowerCase() === '/exit') {
         handleExit()
         return
       }
@@ -537,7 +627,38 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       <SessionList
         currentSessionId={session.id}
         onSelect={handleResumeSession}
+        onNewSession={handleNewSession}
+        onDeleteSession={handleRequestDeleteSession}
+        onDeleteAll={() => setOverlay('confirm-delete-all')}
         onClose={() => setOverlay('none')}
+      />
+    )
+  }
+
+  if (overlay === 'confirm-delete-session') {
+    const isCurrent = pendingDeleteSessionId === session.id
+    return (
+      <ConfirmDialog
+        title={isCurrent ? 'Delete current session?' : 'Delete session?'}
+        message={isCurrent ? 'This removes the current conversation and starts a new session.' : 'This removes the selected conversation from saved sessions.'}
+        confirmLabel={isCurrent ? 'delete current' : 'delete session'}
+        onConfirm={handleConfirmDeleteSession}
+        onCancel={() => {
+          setPendingDeleteSessionId(null)
+          setOverlay('sessions')
+        }}
+      />
+    )
+  }
+
+  if (overlay === 'confirm-delete-all') {
+    return (
+      <ConfirmDialog
+        title="Delete all sessions?"
+        message="This removes every saved conversation. Memories and preferences are kept."
+        confirmLabel="delete all"
+        onConfirm={handleDeleteAllSessions}
+        onCancel={() => setOverlay('sessions')}
       />
     )
   }
@@ -625,8 +746,6 @@ export function runTUI(resumeSessionId?: string): void {
 
   instance.waitUntilExit().then(() => {
     const info = exitInfoRef.current
-    if (info.hasMessages) {
-      printGoodbye(info)
-    }
+    printGoodbye(info)
   })
 }
