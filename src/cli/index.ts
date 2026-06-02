@@ -2,12 +2,9 @@ import { Command } from 'commander'
 import { runTUI } from '../tui/App.js'
 import { streamChat } from '../core/ollama.js'
 import { renderMarkdown } from '../utils/markdown.js'
-import { loadConfig, setAccentColor, saveConfig, setModel, type AccentColor } from '../config/index.js'
+import { loadConfig, setAccentColor, setModel, type AccentColor } from '../config/index.js'
 import { checkHealth } from '../core/health.js'
 import { runSetup } from './setup.js'
-import fs from 'fs'
-import path from 'path'
-import os from 'os'
 
 function clearScreen(): void {
   process.stdout.write('\x1B[2J\x1B[3J\x1B[H')
@@ -43,27 +40,17 @@ export function runCLI(): void {
   configCmd
     .command('set')
     .description('Set a configuration value')
-    .argument('<key>', 'config key (accent-color, weather-key, model)')
+    .argument('<key>', 'config key (accent-color, model)')
     .argument('<value>', 'value')
     .action((key: string, value: string) => {
       if (key === 'accent-color') {
         setAccentColor(value as AccentColor)
         console.log(`Accent color set to: ${value}`)
-      } else if (key === 'weather-key') {
-        const config = loadConfig()
-        config.openWeatherApiKey = value
-        const configDir = path.join(os.homedir(), '.null-cli')
-        const configPath = path.join(configDir, 'config.json')
-        if (!fs.existsSync(configDir)) {
-          fs.mkdirSync(configDir, { recursive: true })
-        }
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
-        console.log('OpenWeather API key saved')
       } else if (key === 'model') {
         setModel(value)
         console.log(`Model set to: ${value}`)
       } else {
-        console.error(`Unknown key: ${key}. Valid keys: accent-color, weather-key, model`)
+        console.error(`Unknown key: ${key}. Valid keys: accent-color, model`)
         process.exit(1)
       }
     })
@@ -106,10 +93,6 @@ export function runCLI(): void {
         console.error('Start it with: \x1B[36mollama serve\x1B[0m')
         console.error('Or check status with: \x1B[36mnull health\x1B[0m')
         process.exit(1)
-      }
-
-      if (!health.internet.available) {
-        process.stderr.write('\x1B[33mWarning:\x1B[0m No internet connection — web search will be unavailable.\n')
       }
 
       if (!promptParts || promptParts.length === 0) {

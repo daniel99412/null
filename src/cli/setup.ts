@@ -104,55 +104,11 @@ async function stepModel(rl: readline.Interface, models: string[]): Promise<stri
   return chosen
 }
 
-async function stepWeatherKey(rl: readline.Interface): Promise<string | null> {
-  print('\n' + bold('Step 3: OpenWeather API key') + dim(' — optional, for weather queries'))
-
-  const config = loadConfig()
-
-  if (config.openWeatherApiKey) {
-    print(dim(`  Already configured (key ends in ...${config.openWeatherApiKey.slice(-4)})`))
-    const keep = await ask(rl, '  Keep existing key? [Y/n]: ')
-    if (!keep || keep.toLowerCase() !== 'n') {
-      return config.openWeatherApiKey
-    }
-  }
-
-  print(dim('  Get a free key at: https://openweathermap.org/api'))
-  const key = await ask(rl, '  Paste your API key (or press Enter to skip): ')
-
-  if (!key) {
-    print(dim('  Skipped. You can add it later with: null config set weather-key <key>'))
-    return null
-  }
-
-  // Quick validation
-  process.stdout.write('  Validating key... ')
-  try {
-    const res = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?q=London&appid=${key}&units=metric`,
-      { signal: AbortSignal.timeout(5000) },
-    )
-    if (res.ok) {
-      print(green('✓ valid'))
-      return key
-    } else {
-      print(red(`✗ invalid (${res.status})`))
-      print(dim('  Skipped. Double-check your key and add it later.'))
-      return null
-    }
-  } catch {
-    print(yellow('⚠ could not validate (no internet?)'))
-    print(dim('  Key saved anyway. Test with: null "what is the weather today"'))
-    return key
-  }
-}
-
-function printSummary(model: string, hasWeatherKey: boolean): void {
+function printSummary(model: string): void {
   print('\n' + bold('Setup complete!') + ' ' + green('✓'))
   print('')
   print(dim('  Configuration:'))
   print(`    Model      ${cyan(model)}`)
-  print(`    Weather    ${hasWeatherKey ? green('configured') : dim('not configured')}`)
   print('')
   print(dim('  Try it:'))
   print(`    ${cyan('null')}                    ${dim('open interactive chat')}`)
@@ -199,20 +155,13 @@ export async function runSetup(): Promise<void> {
       dirty = true
     }
 
-    // Step 3: Weather key
-    const weatherKey = await stepWeatherKey(rl)
-    if (weatherKey !== null && weatherKey !== config.openWeatherApiKey) {
-      config.openWeatherApiKey = weatherKey
-      dirty = true
-    }
-
     // Save config
     if (dirty) {
       saveConfig(config)
       print('\n' + dim('  Config saved to ~/.null-cli/config.json'))
     }
 
-    printSummary(config.model ?? DEFAULT_MODEL, !!config.openWeatherApiKey)
+    printSummary(config.model ?? DEFAULT_MODEL)
   } finally {
     rl.close()
   }

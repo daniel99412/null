@@ -81,19 +81,6 @@ export function normalizeValue(value: string): string {
 }
 
 /**
- * Return all aliases of type 'preference' — used by router to build
- * a dynamic regex for sports-related queries (teams, leagues, sports).
- * Synchronous — reads from SQLite in-process, negligible latency.
- */
-export function getSportsAliases(): string[] {
-  const db = getDb()
-  const rows = db
-    .prepare("SELECT alias FROM memory_aliases WHERE type = 'preference'")
-    .all() as { alias: string }[]
-  return rows.map(r => r.alias)
-}
-
-/**
  * Resolve an alias to its canonical value + type using the memory_aliases table.
  * Returns null if no alias found — caller should use the original value.
  */

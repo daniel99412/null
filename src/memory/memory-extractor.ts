@@ -1,5 +1,5 @@
 import { getRouterClient } from '../core/llm-client.js'
-import { upsertMemories, type MemoryType, type UpsertMemoryOptions } from './memory-store.js'
+import { upsertMemories, normalizeValue, type MemoryType, type UpsertMemoryOptions } from './memory-store.js'
 import { debugLog } from '../utils/debug.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -51,6 +51,35 @@ const VALID_TYPES = new Set<string>([
   'behavior', 'dislike', 'location', 'alias_self',
 ])
 
+const TECH_KEYWORDS = [
+  'typescript',
+  'javascript',
+  'python',
+  'react',
+  'vue',
+  'angular',
+  'node',
+  'nodejs',
+  'java',
+  'kotlin',
+  'swift',
+  'rust',
+  'go',
+  'php',
+  'ruby',
+  'docker',
+  'kubernetes',
+  'aws',
+  'gcp',
+  'azure',
+  'postgres',
+  'mysql',
+  'mongodb',
+  'redis',
+  'graphql',
+  'nextjs',
+]
+
 function parseExtractorResponse(raw: string): ExtractedMemory[] {
   // Strip markdown code fences if present
   const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
@@ -95,6 +124,99 @@ function parseExtractorResponse(raw: string): ExtractedMemory[] {
   } catch {
     return []
   }
+}
+
+// ── Deterministic extractor ──────────────────────────────────────────────────
+
+/**
+ * Fast deterministic extraction for high-confidence facts.
+ * This runs before routing/fast-path so simple personal statements do not depend
+ * on the small LLM extractor finishing successfully in the background.
+ */
+export function extractDeterministicMemoriesFromMessage(
+  message: string,
+  sessionId?: string,
+): ExtractedMemory[] {
+  const extracted: ExtractedMemory[] = []
+  const text = message.trim()
+  if (!text || text.startsWith('/')) return []
+
+  const push = (item: ExtractedMemory): void => {
+    if (extracted.some((m) => m.type === item.type && normalizeValue(m.value) === normalizeValue(item.value))) return
+    extracted.push(item)
+  }
+
+  const nameMatch = text.match(/\b(?:me llamo|mi nombre es|ll[aá]mame|my name is|call me)\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ.'-]*(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ.'-]*){0,2})/i)
+  if (nameMatch) {
+    const value = cleanCapture(nameMatch[1])
+    if (value) {
+      push({ type: 'alias_self', value, confidence: 0.98, raw: nameMatch[0] })
+    }
+  }
+
+  const locationMatch = text.match(/\b(?:vivo en|estoy en|ubicado en|live in|based in|i(?:'m| am) from)\s+([^,.!?]{2,60})/i)
+  if (locationMatch) {
+    const value = cleanCapture(locationMatch[1])
+    if (value) {
+      push({ type: 'location', value, confidence: 0.85, raw: locationMatch[0] })
+    }
+  }
+
+  const occupationMatch = text.match(/\b(?:soy|trabajo como|work as|i(?:'m| am) a(?:n)?)\s+([^,.!?]{2,50}?\b(?:dev|developer|engineer|ingeniero|programador|architect|arquitecto|devops|qa|tester|designer|diseñador|freelance|consultant|consultor)\b[^,.!?]{0,20})/i)
+  if (occupationMatch) {
+    const value = cleanCapture(occupationMatch[1])
+    if (value) {
+      push({ type: 'occupation', value, confidence: 0.9, raw: occupationMatch[0] })
+    }
+  }
+
+  const behaviorMatch = text.match(/\b(?:prefiero|prefer)\s+(?:respuestas?\s+)?(cortas?|short|breves?|brief|largas?|long|detalladas?|detailed|concisas?|concise)\b/i)
+  if (behaviorMatch) {
+    push({ type: 'behavior', value: `prefers ${normalizeValue(behaviorMatch[1])} answers`, confidence: 0.85, raw: behaviorMatch[0] })
+  }
+
+  const techIntro = /\b(?:uso|use|work with|trabajo con|mi stack|my stack|usamos|we use)\b/i.test(text)
+  if (techIntro) {
+    const normalized = normalizeTechText(text)
+    for (const tech of TECH_KEYWORDS) {
+      const re = new RegExp(`\\b${escapeRegex(tech)}\\b`, 'i')
+      if (re.test(normalized)) {
+        push({ type: 'tech_stack', value: tech, confidence: 0.9, raw: tech })
+      }
+    }
+  }
+
+  if (extracted.length === 0) return []
+
+  upsertMemories(extracted.map((item) => ({
+    type: item.type,
+    value: item.value,
+    rawValue: item.raw,
+    confidence: item.confidence,
+    source: 'explicit',
+    sessionId,
+  })))
+
+  debugLog(`[memory-extractor] deterministic: ${extracted.map((m) => `${m.type}=${m.value}`).join(', ')}`)
+  return extracted
+}
+
+function cleanCapture(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[),.;:!?]+$/u, '')
+}
+
+function normalizeTechText(value: string): string {
+  return normalizeValue(value)
+    .replace(/\bnode\.?js\b/g, 'nodejs')
+    .replace(/\bnext\.?js\b/g, 'nextjs')
+    .replace(/\bmongo\b/g, 'mongodb')
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────

@@ -1,9 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { streamChat } from '../core/ollama.js'
-import { getCommentaryClient } from '../core/llm-client.js'
-import { buildSportsCommentaryPrompt } from '../tools/espn.js'
-import { buildPreferencesContext } from '../memory/preferences.js'
+
 import { useLoading } from './hooks/useLoading.js'
 import { useCursor } from './hooks/useCursor.js'
 import { Splash } from './components/Splash.js'
@@ -22,7 +20,9 @@ import {
   createSession,
   getSession,
   getSessionMessages,
+  getSessionPromptMessages,
   saveMessage,
+  saveMessageParts,
   updateSessionTitle,
   getSummary,
   reactivateSession,
@@ -34,6 +34,9 @@ import type { Session } from '../memory/sessions.js'
 import { runCleanup } from '../memory/cleanup.js'
 import { loadConfig, DEFAULT_MODEL } from '../config/index.js'
 import { processQuery, processQueryWithReAct } from '../core/agent.js'
+import { buildPromptMessages } from '../core/prompt-builder.js'
+import { hasDocumentRefs, resolveDocumentParts } from '../core/document-context.js'
+import { buildGeneralMemoryContext } from '../memory/memory-retrieval.js'
 
 const MODEL = loadConfig().model ?? DEFAULT_MODEL
 
@@ -328,7 +331,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       const txt = input
 
       // Save user message to DB
-      saveMessage(session.id, 'user', txt)
+      const userMessageId = saveMessage(session.id, 'user', txt)
       messageCountRef.current++
 
       // Auto-title session from first user message
@@ -353,26 +356,36 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       buffer.current = ''
 
       const sendToLLM = async (): Promise<void> => {
-        // Build conversation history from all previous turns.
-        // Use currentMessages (captured before state update) to avoid React batching issues.
+        const documentParts = hasDocumentRefs(txt)
+          ? await resolveDocumentParts(txt)
+          : []
+
+        if (documentParts.length > 0) {
+          saveMessageParts(session.id, userMessageId, documentParts)
+        }
+
+        // Build conversation history from structured DB parts when available.
+        // Recall-only UI messages are still captured from currentMessages because
+        // archived session summaries are shown without restoring old messages.
         if (process.env['NULL_DEBUG']) {
           console.error(`[null-debug] currentMessages length: ${currentMessages.length}`)
         }
-        const history: { role: string; content: string }[] = currentMessages
+        const dbHistory = getSessionPromptMessages(session.id, { beforeMessageId: userMessageId })
+        const recallHistory: { role: 'system'; content: string }[] = currentMessages
           .filter((m) => {
-            if (m.role === 'assistant' && !m.content.trim()) return false
             if (m.role === 'recall' && !m.content.trim()) return false
-            return true
+            return m.role === 'recall'
           })
           .map((m) => {
-            if (m.role === 'recall') {
-              return {
-                role: 'system',
-                content: `[Recall — summary of a previous conversation in this session]\n${m.content}\n\nUse this context if relevant to what the user asks next.`,
-              }
+            return {
+              role: 'system',
+              content: `[Recall — summary of a previous conversation in this session]\n${m.content}\n\nUse this context if relevant to what the user asks next.`,
             }
-            return { role: m.role, content: m.content }
           })
+        const history: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+          ...recallHistory,
+          ...dbHistory,
+        ]
         if (process.env['NULL_DEBUG']) {
           console.error(`[null-debug] history length after filter: ${history.length}`)
           history.forEach((m, i) => console.error(`  [${i}] ${m.role}: ${String(m.content).slice(0, 60)}`))
@@ -389,7 +402,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             if (last?.role === 'assistant') last.content = statusMsg
             return copy
           })
-        })
+        }, session.id)
 
         // Clear status before streaming the real response
         updateMessages((m) => {
@@ -416,7 +429,10 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         if (agentResult.useReAct && !isExplicitSearch) {
           const reactResult = await processQueryWithReAct(
             agentResult.userContent,
-            history,
+            [
+              ...history,
+              ...documentParts.map((part) => ({ role: 'system', content: part.content })),
+            ],
             (statusMsg) => {
               updateMessages((m) => {
                 const copy = [...m]
@@ -446,91 +462,21 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           return
         }
 
-        // Sports query — show table immediately, then stream LLM commentary below
-        if (agentResult.tableOutput) {
-          // Step 1: render the table right away so the user sees data instantly
-          updateMessages((m) => {
-            const copy = [...m]
-            const last = copy[copy.length - 1]
-            if (last?.role === 'assistant') last.content = agentResult.tableOutput!
-            return copy
-          })
-
-          // Step 2: build commentary prompt
-          // For news intent, skip scoreboard commentary — use news context directly
-          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-          let commentMessages: { role: string; content: string }[]
-
-          if (agentResult.newsIntent) {
-            // News query: comment based on headlines, not the scoreboard
-            const newsContext = agentResult.searchContext ?? ''
-            commentMessages = [
-              ...(newsContext ? [{ role: 'system', content: newsContext }] : []),
-              {
-                role: 'user',
-                content: `${txt}\n\nResume las noticias más relevantes del equipo en 2-4 líneas. Usa SOLO los titulares de arriba. No inventes nada. Responde en español.`,
-              },
-            ]
-          } else if (agentResult.scoreboard) {
-            const prefsCtx = buildPreferencesContext() ?? undefined
-            const { systemPrompt, userInstruction } = buildSportsCommentaryPrompt(
-              agentResult.scoreboard,
-              txt,
-              tz,
-              prefsCtx,
-            )
-            // Debug log
-            process.stderr.write(`[null-debug] === SPORTS COMMENTARY PROMPT (structured) ===\n`)
-            process.stderr.write(`[null-debug] System:\n${systemPrompt}\n`)
-            process.stderr.write(`[null-debug] User instruction:\n${userInstruction}\n`)
-            process.stderr.write(`[null-debug] === END PROMPT ===\n`)
-
-            commentMessages = [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userInstruction },
-            ]
-          } else {
-            // Fallback: no scoreboard, use raw context
-            const sportSystemContent = agentResult.searchContext ?? ''
-            commentMessages = [
-              ...(sportSystemContent ? [{ role: 'system', content: sportSystemContent }] : []),
-              {
-                role: 'user',
-                content: `${txt}\n\nEscribe 2-4 líneas de comentario deportivo basado SOLO en los datos anteriores. No inventes nada.`,
-              },
-            ]
-          }
-
-          const commentaryClient = getCommentaryClient()
-          let commentary = ''
-          await commentaryClient.streamChat(
-            commentMessages.map((m) => ({
-              role: m.role as 'system' | 'user' | 'assistant',
-              content: m.content,
-            })),
-            (tok) => {
-              commentary += tok
-              updateMessages((m) => {
-                const copy = [...m]
-                const last = copy[copy.length - 1]
-                if (last?.role === 'assistant') {
-                  last.content = `${agentResult.tableOutput!}\n\n${commentary}`
-                }
-                return copy
-              })
-            },
-            { temperature: 0.3 },
-          )
-
-          buffer.current = `${agentResult.tableOutput}\n\n${commentary}`
-          return
-        }
-
-        // Inject search context as a system message before the user message
-        if (agentResult.searchContext) {
-          history.push({ role: 'system', content: agentResult.searchContext })
-        }
-        history.push({ role: 'user', content: agentResult.userContent })
+        const memoryContext = buildGeneralMemoryContext(agentResult.userContent)
+        const promptMessages = buildPromptMessages({
+          query: agentResult.userContent,
+          history,
+          memoryContext,
+          documentParts,
+          toolParts: agentResult.searchContext
+            ? [{
+              type: 'tool_observation',
+              content: agentResult.searchContext,
+              synthetic: true,
+              metadata: { source: 'router' },
+            }]
+            : [],
+        })
 
         // Use lower temperature when grounding response in external data (webSearch)
         // to reduce hallucinations. Free conversation keeps default (0.8).
@@ -546,7 +492,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             }
             return copy
           })
-        }, history, undefined, chatOptions)
+        }, promptMessages, undefined, chatOptions)
       }
 
       sendToLLM().then(() => {

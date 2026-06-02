@@ -1,8 +1,3 @@
-import { searchAndExtract } from '../tools/web-search.js'
-import type { SearchContext } from '../tools/web-search.js'
-import { fetchPageText } from '../tools/web-fetch.js'
-import { getLocation, type GeoLocation } from '../tools/gps.js'
-import { getCurrentWeather, type WeatherData } from '../tools/weather.js'
 // Ensures execute.ts stays in sync with the tools registry (compile-time validation)
 import type {} from './execute.js'
 
@@ -18,19 +13,21 @@ export const tools = {
     }
   },
 
-  get_location: async (): Promise<GeoLocation> => {
-    return getLocation()
-  },
-
-  get_weather: async (): Promise<WeatherData> => {
-    return getCurrentWeather()
-  },
-
-  web_search: async (query: string): Promise<SearchContext> => {
-    return searchAndExtract(query)
-  },
-
-  web_fetch: async (url: string): Promise<string> => {
-    return fetchPageText(url)
+  get_location: async () => {
+    // Location via IP geolocation — simple fallback
+    try {
+      const res = await fetch('https://ipapi.co/json/')
+      if (!res.ok) throw new Error(`ipapi.co error: ${res.status}`)
+      const data = await res.json() as { city?: string; region?: string; country_name?: string; latitude?: number; longitude?: number }
+      return {
+        city: data.city ?? 'Unknown',
+        region: data.region ?? '',
+        country: data.country_name ?? '',
+        lat: data.latitude ?? 0,
+        lon: data.longitude ?? 0,
+      }
+    } catch {
+      return { city: 'Unknown', region: '', country: '', lat: 0, lon: 0 }
+    }
   },
 }

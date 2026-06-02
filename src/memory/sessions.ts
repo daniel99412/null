@@ -1,4 +1,6 @@
 import { getDb, closeDb } from './database.js'
+import type { LLMMessage } from '../core/prompt-builder.js'
+import type { MessagePart } from '../core/document-context.js'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'recall'
@@ -26,6 +28,20 @@ interface MessageRow {
   session_id: string
   role: 'user' | 'assistant'
   content: string
+  created_at: string
+}
+
+interface MessagePartRow {
+  id: number
+  message_id: number
+  session_id: string
+  type: MessagePart['type']
+  content: string
+  path: string | null
+  filename: string | null
+  mime: string | null
+  synthetic: 0 | 1
+  metadata_json: string | null
   created_at: string
 }
 
@@ -71,13 +87,21 @@ export function saveMessage(
   sessionId: string,
   role: 'user' | 'assistant',
   content: string,
-): void {
+): number {
   const db = getDb()
-  db.prepare(
+  const result = db.prepare(
     'INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)',
   ).run(sessionId, role, content)
+  const messageId = Number(result.lastInsertRowid)
+
+  saveMessageParts(sessionId, messageId, [{
+    type: 'text',
+    content,
+    synthetic: false,
+  }])
 
   updateSessionTimestamp(sessionId)
+  return messageId
 }
 
 export function getSessionMessages(sessionId: string): ChatMessage[] {
@@ -87,6 +111,101 @@ export function getSessionMessages(sessionId: string): ChatMessage[] {
     .all(sessionId) as MessageRow[]
 
   return rows.map((r) => ({ role: r.role, content: r.content }))
+}
+
+export function saveMessageParts(
+  sessionId: string,
+  messageId: number,
+  parts: MessagePart[],
+): void {
+  if (parts.length === 0) return
+
+  const db = getDb()
+  const insert = db.prepare(`
+    INSERT INTO message_parts (
+      message_id,
+      session_id,
+      type,
+      content,
+      path,
+      filename,
+      mime,
+      synthetic,
+      metadata_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const insertMany = db.transaction((items: MessagePart[]) => {
+    for (const part of items) {
+      insert.run(
+        messageId,
+        sessionId,
+        part.type,
+        part.content,
+        part.path ?? null,
+        part.filename ?? null,
+        part.mime ?? null,
+        part.synthetic ? 1 : 0,
+        part.metadata ? JSON.stringify(part.metadata) : null,
+      )
+    }
+  })
+
+  insertMany(parts)
+}
+
+export function getMessageParts(messageId: number): MessagePart[] {
+  const db = getDb()
+  const rows = db.prepare(
+    'SELECT * FROM message_parts WHERE message_id = ? ORDER BY id ASC',
+  ).all(messageId) as MessagePartRow[]
+
+  return rows.map(rowToMessagePart)
+}
+
+export function getSessionPromptMessages(
+  sessionId: string,
+  options: { beforeMessageId?: number } = {},
+): LLMMessage[] {
+  const db = getDb()
+  const rows = db.prepare(`
+    SELECT id, session_id, role, content, created_at
+    FROM messages
+    WHERE session_id = ?
+      AND (? IS NULL OR id < ?)
+    ORDER BY id ASC
+  `).all(sessionId, options.beforeMessageId ?? null, options.beforeMessageId ?? null) as MessageRow[]
+
+  if (rows.length === 0) return []
+
+  const messageIds = rows.map((row) => row.id)
+  const placeholders = messageIds.map(() => '?').join(',')
+  const partRows = placeholders
+    ? db.prepare(`SELECT * FROM message_parts WHERE message_id IN (${placeholders}) ORDER BY message_id ASC, id ASC`).all(...messageIds) as MessagePartRow[]
+    : []
+  const partsByMessageId = new Map<number, MessagePartRow[]>()
+
+  for (const part of partRows) {
+    const existing = partsByMessageId.get(part.message_id) ?? []
+    existing.push(part)
+    partsByMessageId.set(part.message_id, existing)
+  }
+
+  return rows.map((row) => {
+    const parts = partsByMessageId.get(row.id)
+    if (!parts || parts.length === 0) {
+      return { role: row.role, content: row.content }
+    }
+
+    const textPart = parts.find((part) => part.type === 'text')
+    const syntheticParts = parts.filter((part) => part.synthetic === 1 && part.type !== 'text')
+    const content = [
+      textPart?.content ?? row.content,
+      ...syntheticParts.map((part) => part.content),
+    ].filter((part) => part.trim().length > 0).join('\n\n')
+
+    return { role: row.role, content }
+  })
 }
 
 export function listSessions(limit: number = 10): Session[] {
@@ -99,6 +218,7 @@ export function listSessions(limit: number = 10): Session[] {
 
 export function deleteSession(id: string): void {
   const db = getDb()
+  db.prepare('DELETE FROM message_parts WHERE session_id = ?').run(id)
   db.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
   db.prepare('DELETE FROM session_summaries WHERE session_id = ?').run(id)
   db.prepare('UPDATE memory_events SET session_id = NULL WHERE session_id = ?').run(id)
@@ -108,6 +228,7 @@ export function deleteSession(id: string): void {
 export function deleteAllSessions(): void {
   const db = getDb()
   const deleteAll = db.transaction(() => {
+    db.prepare('DELETE FROM message_parts').run()
     db.prepare('DELETE FROM messages').run()
     db.prepare('DELETE FROM session_summaries').run()
     db.prepare('UPDATE memory_events SET session_id = NULL').run()
@@ -172,7 +293,31 @@ export function getSummary(sessionId: string): SessionSummary | undefined {
  */
 export function deleteSessionMessages(sessionId: string): void {
   const db = getDb()
+  db.prepare('DELETE FROM message_parts WHERE session_id = ?').run(sessionId)
   db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId)
+}
+
+function rowToMessagePart(row: MessagePartRow): MessagePart {
+  return {
+    type: row.type,
+    content: row.content,
+    path: row.path,
+    filename: row.filename,
+    mime: row.mime,
+    synthetic: row.synthetic === 1,
+    metadata: row.metadata_json ? parseMetadata(row.metadata_json) : undefined,
+  }
+}
+
+function parseMetadata(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return typeof parsed === 'object' && parsed !== null
+      ? parsed as Record<string, unknown>
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export { closeDb }
