@@ -17,6 +17,7 @@ import { CommandPalette } from './components/CommandPalette.js'
 import type { CommandItem } from './components/CommandPalette.js'
 import { SessionList } from './components/SessionList.js'
 import { ColorPicker } from './components/ColorPicker.js'
+import { ArticleReader, type DigestArticle } from './components/ArticleReader.js'
 import { ThemeProvider } from './context/ThemeContext.js'
 import {
   createSession,
@@ -44,7 +45,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
-type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all'
+type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all' | 'article-reader'
 
 interface ChatProps {
   resumeSessionId?: string
@@ -138,6 +139,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const [scrollOffset, setScrollOffset] = useState(0)
   const [overlay, setOverlay] = useState<Overlay>('none')
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
+  const [digestArticles, setDigestArticles] = useState<Array<{ position: number; title: string; url: string; source: string; category: string }>>([])
+  const [readingArticle, setReadingArticle] = useState<DigestArticle | null>(null)
   const messageCountRef = useRef(0)
 
   // Load existing messages when resuming a session
@@ -316,6 +319,17 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
+    // Number keys 1-9 open the corresponding article from the last news digest
+    if (!isLoading && /^[1-9]$/.test(char) && digestArticles.length > 0) {
+      const idx = parseInt(char, 10) - 1
+      const article = digestArticles[idx]
+      if (article) {
+        setReadingArticle(article)
+        setOverlay('article-reader')
+        return
+      }
+    }
+
     if (isLoading) return
 
     if (key.return) {
@@ -408,6 +422,11 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             return copy
           })
           buffer.current = agentResult.directResponse
+          if (agentResult.digestArticles && agentResult.digestArticles.length > 0) {
+            setDigestArticles(agentResult.digestArticles)
+          } else {
+            setDigestArticles([])
+          }
           return
         }
 
@@ -671,6 +690,18 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     )
   }
 
+  if (overlay === 'article-reader' && readingArticle) {
+    return (
+      <ArticleReader
+        article={readingArticle}
+        onClose={() => {
+          setOverlay('none')
+          setReadingArticle(null)
+        }}
+      />
+    )
+  }
+
   return (
     <Box flexDirection="column" height={terminalHeight}>
       <Header model={MODEL} sessionId={session.id} />
@@ -698,6 +729,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         isAtBottom={isAtBottom}
         hasMoreLines={hasMoreLines}
         scrollOffset={scrollOffset}
+        digestCount={digestArticles.length}
       />
     </Box>
   )

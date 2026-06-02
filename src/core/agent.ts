@@ -38,6 +38,8 @@ export interface AgentResult {
   teamNewsCount?: number
   /** When set, display this text directly without streaming through LLM */
   directResponse?: string
+  /** Articles from a news digest — enables "press 1-9 to read full" in TUI */
+  digestArticles?: Array<{ position: number; title: string; url: string; source: string; category: string }>
 }
 
 interface FetchedArticle {
@@ -487,7 +489,8 @@ export async function processQuery(
         userContent: query,
         searchContext: null,
         statusMessage: 'Obteniendo noticias de México...',
-        directResponse: digest,
+        directResponse: digest.formatted,
+        digestArticles: digest.articles,
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

@@ -9,6 +9,7 @@ interface FooterProps {
   isAtBottom: boolean
   hasMoreLines: boolean
   scrollOffset: number
+  digestCount?: number
 }
 
 export function Footer({
@@ -17,6 +18,7 @@ export function Footer({
   isAtBottom,
   hasMoreLines,
   scrollOffset,
+  digestCount = 0,
 }: FooterProps) {
   const { accent } = useTheme()
 
@@ -32,6 +34,12 @@ export function Footer({
       <Box>
         {!isAtBottom && hasMoreLines ? (
           <Text color="yellow">{scrollOffset} lines above  </Text>
+        ) : null}
+        {digestCount > 0 && !isLoading ? (
+          <>
+            <Text color="gray">1-9</Text>
+            <Text color="white"> leer  </Text>
+          </>
         ) : null}
         <Text color="gray">ctrl+p</Text>
         <Text color="white"> commands  </Text>

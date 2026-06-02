@@ -176,7 +176,20 @@ function formatDigest(stories: NewsStory[], fetchedAt: Date): string {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export async function buildMexicoNewsDigest(query = 'mexico'): Promise<string> {
+export interface DigestArticle {
+  position: number
+  title: string
+  url: string
+  source: string
+  category: string
+}
+
+export interface DigestResult {
+  formatted: string
+  articles: DigestArticle[]
+}
+
+export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestResult> {
   const scope = 'mexico'
   // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
   const DIGEST_FORMAT_VERSION = 'v3'
@@ -186,7 +199,11 @@ export async function buildMexicoNewsDigest(query = 'mexico'): Promise<string> {
   const cached = getDigestCache(scope, cacheKey)
   if (cached) {
     debugLog('[news-digest] serving from cache')
-    return cached
+    return {
+      formatted: cached,
+      // Cached entries don't carry article URLs — reader disabled for cached digests
+      articles: [],
+    }
   }
 
   debugLog('[news-digest] building fresh digest...')
@@ -204,7 +221,10 @@ export async function buildMexicoNewsDigest(query = 'mexico'): Promise<string> {
   debugLog(`[news-digest] total articles: ${articles.length}`)
 
   if (articles.length === 0) {
-    return 'No se pudieron obtener noticias. Verifica tu conexión a internet e intenta de nuevo.'
+    return {
+      formatted: 'No se pudieron obtener noticias. Verifica tu conexión a internet e intenta de nuevo.',
+      articles: [],
+    }
   }
 
   // Filter to last 24h (some feeds include old items)
@@ -225,10 +245,22 @@ export async function buildMexicoNewsDigest(query = 'mexico'): Promise<string> {
   const ranked = rankStories(stories).slice(0, 10)
   debugLog(`[news-digest] top ${ranked.length} stories selected`)
 
-  const result = formatDigest(ranked, fetchedAt)
+  const formatted = formatDigest(ranked, fetchedAt)
 
-  // Cache the digest
-  setDigestCache(scope, cacheKey, result)
+  // Build the article list — pick the best article per story (highest reliability)
+  const articlesList: DigestArticle[] = ranked.map((story, i) => {
+    const best = [...story.articles].sort((a, b) => b.reliability - a.reliability)[0]
+    return {
+      position: i + 1,
+      title: story.title,
+      url: best.url,
+      source: best.source,
+      category: story.category,
+    }
+  })
 
-  return result
+  // Cache the digest (just the formatted text — articles are not cached)
+  setDigestCache(scope, cacheKey, formatted)
+
+  return { formatted, articles: articlesList }
 }
