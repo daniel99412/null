@@ -105,7 +105,7 @@ function wrapWithPrefix(text: string, prefix: string, maxWidth: number): string[
   return lines
 }
 
-function formatCard(story: NewsStory, index: number): string {
+function formatCard(story: NewsStory): string {
   const bias = analyzeBias(story)
   const sourceList = story.sources.slice(0, 5).join(' · ')
   const extra = story.sources.length > 5 ? ` +${story.sources.length - 5}` : ''
@@ -135,7 +135,7 @@ function formatCard(story: NewsStory, index: number): string {
   lines.push(`│ Polarización: ${bias.polarizationLabel}`)
   lines.push('└')
 
-  return `${index + 1}. ${lines.join('\n')}`
+  return lines.join('\n')
 }
 
 function formatDigest(stories: NewsStory[], fetchedAt: Date): string {
@@ -156,7 +156,7 @@ function formatDigest(stories: NewsStory[], fetchedAt: Date): string {
     return `${header}No se pudieron obtener noticias en este momento. Intenta de nuevo en unos minutos.`
   }
 
-  const cards = stories.map((s, i) => formatCard(s, i)).join('\n\n')
+  const cards = stories.map((s) => formatCard(s)).join('\n\n')
 
   const footer = [
     '',
