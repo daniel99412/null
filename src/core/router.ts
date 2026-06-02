@@ -124,6 +124,7 @@ const SIGNALS: Signal[] = [
 
   // ── MEXICONEWSDIGEST — general Mexico news queries ────────────────────────
   { pattern: /\b(dame|d[aá]me)\b.*\b(las?\s+)?noticias?\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'dame las noticias' },
+  { pattern: /\b(me\s+)?(das?|puedes? darme?|puedes?\s+darme|me\s+das)\b.*\b(las?\s+)?noticias?\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'me das las noticias' },
   { pattern: /\bqué\s+pas[oó]\s+(hoy|esta semana|ayer)\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'qué pasó hoy' },
   { pattern: /\b(que|qué)\s+pas[oó]\s+(hoy|esta semana|ayer)\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'que paso hoy' },
   { pattern: /\b(resumen|digest)\b.*\bnoticias?\b/i, intent: 'mexicoNewsDigest', weight: 18, description: 'resumen de noticias' },
