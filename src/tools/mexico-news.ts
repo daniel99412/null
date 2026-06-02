@@ -172,7 +172,9 @@ function formatDigest(stories: NewsStory[], fetchedAt: Date): string {
 
 export async function buildMexicoNewsDigest(query = 'mexico'): Promise<string> {
   const scope = 'mexico'
-  const cacheKey = query.toLowerCase().trim().slice(0, 80)
+  // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
+  const DIGEST_FORMAT_VERSION = 'v2'
+  const cacheKey = `${DIGEST_FORMAT_VERSION}:${query.toLowerCase().trim().slice(0, 80)}`
 
   // Check digest cache first
   const cached = getDigestCache(scope, cacheKey)
