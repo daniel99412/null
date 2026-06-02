@@ -747,5 +747,8 @@ export function runTUI(resumeSessionId?: string): void {
   instance.waitUntilExit().then(() => {
     const info = exitInfoRef.current
     printGoodbye(info)
+    // Ensure the process exits cleanly — Ink may leave handles (e.g. raw mode)
+    // open after waitUntilExit resolves, keeping the event loop alive.
+    process.exit(0)
   })
 }
