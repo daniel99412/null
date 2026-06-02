@@ -21,21 +21,26 @@ import { debugLog } from '../utils/debug.js'
 
 const DIGEST_TTL_MINUTES = 15
 
-function getDigestCache(scope: string, query: string): string | null {
+function getDigestCache(scope: string, query: string): DigestResult | null {
   const db = getDb()
   const row = db.prepare(`
     SELECT result_json FROM news_digest_cache
     WHERE scope = ? AND query = ? AND expires_at > datetime('now')
   `).get(scope, query) as { result_json: string } | undefined
-  return row?.result_json ?? null
+  if (!row) return null
+  try {
+    return JSON.parse(row.result_json) as DigestResult
+  } catch {
+    return null
+  }
 }
 
-function setDigestCache(scope: string, query: string, result: string): void {
+function setDigestCache(scope: string, query: string, result: DigestResult): void {
   const db = getDb()
   db.prepare(`
     INSERT OR REPLACE INTO news_digest_cache (scope, query, result_json, expires_at)
     VALUES (?, ?, ?, datetime('now', '+${DIGEST_TTL_MINUTES} minutes'))
-  `).run(scope, query, result)
+  `).run(scope, query, JSON.stringify(result))
 }
 
 // ─── Formatting ───────────────────────────────────────────────────────────────
@@ -192,18 +197,14 @@ export interface DigestResult {
 export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestResult> {
   const scope = 'mexico'
   // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
-  const DIGEST_FORMAT_VERSION = 'v3'
+  const DIGEST_FORMAT_VERSION = 'v4'
   const cacheKey = `${DIGEST_FORMAT_VERSION}:${query.toLowerCase().trim().slice(0, 80)}`
 
   // Check digest cache first
   const cached = getDigestCache(scope, cacheKey)
   if (cached) {
     debugLog('[news-digest] serving from cache')
-    return {
-      formatted: cached,
-      // Cached entries don't carry article URLs — reader disabled for cached digests
-      articles: [],
-    }
+    return cached
   }
 
   debugLog('[news-digest] building fresh digest...')
@@ -259,8 +260,9 @@ export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestRes
     }
   })
 
-  // Cache the digest (just the formatted text — articles are not cached)
-  setDigestCache(scope, cacheKey, formatted)
+  // Cache the full result (formatted + articles) so the reader keeps working
+  // on subsequent requests within the TTL window.
+  setDigestCache(scope, cacheKey, { formatted, articles: articlesList })
 
   return { formatted, articles: articlesList }
 }
