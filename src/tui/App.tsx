@@ -81,8 +81,6 @@ function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: Co
       flexDirection="column"
       alignItems="center"
       justifyContent="center"
-      height={rows}
-      width={cols}
     >
       <Box
         flexDirection="column"
@@ -90,6 +88,7 @@ function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: Co
         borderStyle="round"
         borderColor="red"
         paddingX={1}
+        backgroundColor="black"
       >
         <Box marginBottom={1}>
           <Text color="red" bold>{title}</Text>
@@ -630,61 +629,14 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     }
   })
 
-  // Full-screen overlays that replace the chat
-  if (overlay === 'sessions') {
-    return (
-      <SessionList
-        currentSessionId={session.id}
-        onSelect={handleResumeSession}
-        onNewSession={handleNewSession}
-        onDeleteSession={handleRequestDeleteSession}
-        onDeleteAll={() => setOverlay('confirm-delete-all')}
-        onClose={() => setOverlay('none')}
-      />
-    )
-  }
-
-  if (overlay === 'confirm-delete-session') {
-    const isCurrent = pendingDeleteSessionId === session.id
-    return (
-      <ConfirmDialog
-        title={isCurrent ? 'Delete current session?' : 'Delete session?'}
-        message={isCurrent ? 'This removes the current conversation and starts a new session.' : 'This removes the selected conversation from saved sessions.'}
-        confirmLabel={isCurrent ? 'delete current' : 'delete session'}
-        onConfirm={handleConfirmDeleteSession}
-        onCancel={() => {
-          setPendingDeleteSessionId(null)
-          setOverlay('sessions')
-        }}
-      />
-    )
-  }
-
-  if (overlay === 'confirm-delete-all') {
-    return (
-      <ConfirmDialog
-        title="Delete all sessions?"
-        message="This removes every saved conversation. Memories and preferences are kept."
-        confirmLabel="delete all"
-        onConfirm={handleDeleteAllSessions}
-        onCancel={() => setOverlay('sessions')}
-      />
-    )
-  }
-
-  if (overlay === 'color-picker') {
-    return (
-      <ColorPicker
-        onClose={() => setOverlay('none')}
-      />
-    )
-  }
-
-  // Floating modal overlays: command palette and article reader render ON TOP
-  // of the chat (position="absolute") with a backdrop, so the chat is hidden
-  // behind a scrim while the modal is in focus.
+  // Floating modal overlays: any non-'none' overlay renders ON TOP of the chat
+  // (position="absolute") so the user keeps visual context of their conversation.
   const isModalOpen: boolean =
     overlay === 'command-palette' ||
+    overlay === 'sessions' ||
+    overlay === 'confirm-delete-session' ||
+    overlay === 'confirm-delete-all' ||
+    overlay === 'color-picker' ||
     (overlay === 'article-reader' && readingArticle !== null)
 
   return (
@@ -744,6 +696,45 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
               <CommandPalette
                 commands={COMMANDS}
                 onSelect={handleCommandSelect}
+                onClose={() => setOverlay('none')}
+              />
+            )}
+            {overlay === 'sessions' && (
+              <SessionList
+                currentSessionId={session.id}
+                onSelect={handleResumeSession}
+                onNewSession={handleNewSession}
+                onDeleteSession={handleRequestDeleteSession}
+                onDeleteAll={() => setOverlay('confirm-delete-all')}
+                onClose={() => setOverlay('none')}
+              />
+            )}
+            {overlay === 'confirm-delete-session' && (() => {
+              const isCurrent = pendingDeleteSessionId === session.id
+              return (
+                <ConfirmDialog
+                  title={isCurrent ? 'Delete current session?' : 'Delete session?'}
+                  message={isCurrent ? 'This removes the current conversation and starts a new session.' : 'This removes the selected conversation from saved sessions.'}
+                  confirmLabel={isCurrent ? 'delete current' : 'delete session'}
+                  onConfirm={handleConfirmDeleteSession}
+                  onCancel={() => {
+                    setPendingDeleteSessionId(null)
+                    setOverlay('sessions')
+                  }}
+                />
+              )
+            })()}
+            {overlay === 'confirm-delete-all' && (
+              <ConfirmDialog
+                title="Delete all sessions?"
+                message="This removes every saved conversation. Memories and preferences are kept."
+                confirmLabel="delete all"
+                onConfirm={handleDeleteAllSessions}
+                onCancel={() => setOverlay('sessions')}
+              />
+            )}
+            {overlay === 'color-picker' && (
+              <ColorPicker
                 onClose={() => setOverlay('none')}
               />
             )}

@@ -55,8 +55,6 @@ export function ColorPicker({ onClose }: ColorPickerProps) {
       flexDirection="column"
       alignItems="center"
       justifyContent="center"
-      height={rows}
-      width={cols}
     >
       <Box
         flexDirection="column"
@@ -64,6 +62,7 @@ export function ColorPicker({ onClose }: ColorPickerProps) {
         borderStyle="round"
         borderColor={accent}
         paddingX={1}
+        backgroundColor="black"
       >
         <Box marginBottom={1}>
           <Text color={accent} bold>Theme Color</Text>

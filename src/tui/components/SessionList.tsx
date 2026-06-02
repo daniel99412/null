@@ -153,8 +153,6 @@ export function SessionList({
       flexDirection="column"
       alignItems="center"
       justifyContent="center"
-      height={rows}
-      width={cols}
     >
       <Box
         flexDirection="column"
@@ -162,6 +160,7 @@ export function SessionList({
         borderStyle="round"
         borderColor={accent}
         paddingX={1}
+        backgroundColor="black"
       >
         {/* Title */}
         <Box marginBottom={1}>
