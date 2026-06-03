@@ -698,7 +698,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       <Footer
         isLoading={isLoading}
         loadingPos={loadingPos}
-        isAtEnd={isAtBottom}
+        isAtBottom={isAtBottom}
         hasMoreLines={hasMoreLines}
         scrollOffset={scrollOffset}
         digestCount={digestArticles.length}

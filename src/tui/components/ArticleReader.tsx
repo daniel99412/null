@@ -109,13 +109,11 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
       return
     }
     if (char === 'g' || key.home) {
-      // Jump to top
-      while (!isAtBottom) handleDown()
+      resetScroll()
       return
     }
     if (char === 'G' || key.end) {
-      // Jump to bottom
-      for (let i = 0; i < 9999; i++) handleUp()
+      for (let i = 0; i < 9999; i++) handleDown()
       return
     }
   })

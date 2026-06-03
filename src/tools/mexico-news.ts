@@ -240,7 +240,7 @@ export interface DigestResult {
 export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestResult> {
   const scope = 'mexico'
   // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
-  const DIGEST_FORMAT_VERSION = 'v6'
+  const DIGEST_FORMAT_VERSION = 'v7'
   const cacheKey = `${DIGEST_FORMAT_VERSION}:${query.toLowerCase().trim().slice(0, 80)}`
 
   // Check digest cache first

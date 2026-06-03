@@ -229,9 +229,15 @@ function stripHtml(html: string): string {
     .replace(/<blockquote[^>]*class="[^"]*(instagram-media|twitter-tweet|tiktok-embed|fb-post|fb-video)[^"]*"[^>]*>[\s\S]*?<\/blockquote>/gi, ' ')
     // Drop script/style/noscript/svg/iframe blocks entirely
     .replace(/<(script|style|noscript|svg|iframe|figure)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<img[^>]*alt="([^"]*)"[^>]*\/?>/gi, (_m, alt) => (alt ? ` ${alt} ` : ' '))
+    // Drop images entirely — alt text is often photographer credits, not article content
+    .replace(/<img[^>]*\/?>/gi, ' ')
+    // Drop figcaption, cite (image credits, photo captions)
+    .replace(/<figcaption[^>]*>[\s\S]*?<\/figcaption>/gi, ' ')
+    .replace(/<cite[^>]*>[\s\S]*?<\/cite>/gi, ' ')
     // Drop <aside>, <nav>, <header>, <footer> — typically sidebar/related content
     .replace(/<(aside|nav|header|footer|form|button)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    // Drop <a> but keep inner text (rss-parser's content:encoded wraps summaries in <a>)
+    .replace(/<a[^>]*>([\s\S]*?)<\/a>/gi, '$1')
     // Strip remaining tags
     .replace(/<[^>]+>/g, ' ')
     // Decode common HTML entities

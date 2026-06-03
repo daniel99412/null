@@ -20,42 +20,35 @@ export function useScroll(
 ): UseScrollReturn {
   const { maxLines } = options;
   const scrollOffsetRef = useRef(0);
-  const isUserScrollingRef = useRef(false);
   const [, forceUpdate] = useState(0);
 
   const maxScroll = Math.max(0, lines.length - maxLines);
-  const currentScroll = Math.min(scrollOffsetRef.current, maxScroll);
-  const visibleStart = Math.max(0, lines.length - maxLines - currentScroll);
-  const visibleLines = lines.slice(visibleStart, visibleStart + maxLines);
-  const isAtBottom = currentScroll === 0;
+  const offset = Math.min(scrollOffsetRef.current, maxScroll);
+  const visibleLines = lines.slice(offset, offset + maxLines);
+  const isAtBottom = offset >= maxScroll;
 
   const handleUp = useCallback(() => {
-    if (maxScroll > 0) {
-      isUserScrollingRef.current = true;
+    if (offset > 0) {
+      scrollOffsetRef.current = Math.max(scrollOffsetRef.current - 3, 0);
+      forceUpdate((n) => n + 1);
+    }
+  }, [offset]);
+
+  const handleDown = useCallback(() => {
+    if (offset < maxScroll) {
       scrollOffsetRef.current = Math.min(scrollOffsetRef.current + 3, maxScroll);
       forceUpdate((n) => n + 1);
     }
-  }, [maxScroll]);
-
-  const handleDown = useCallback(() => {
-    if (scrollOffsetRef.current > 0) {
-      scrollOffsetRef.current = Math.max(scrollOffsetRef.current - 3, 0);
-      if (scrollOffsetRef.current === 0) {
-        isUserScrollingRef.current = false;
-      }
-      forceUpdate((n) => n + 1);
-    }
-  }, []);
+  }, [offset, maxScroll]);
 
   const resetScroll = useCallback(() => {
-    isUserScrollingRef.current = false;
     scrollOffsetRef.current = 0;
     forceUpdate((n) => n + 1);
   }, []);
 
   return {
-    scrollOffset: currentScroll,
-    visibleStart,
+    scrollOffset: offset,
+    visibleStart: offset,
     visibleLines,
     isAtBottom,
     handleUp,
