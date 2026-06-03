@@ -39,7 +39,7 @@ export function Footer({
         ) : null}
         {digestCount > 0 && !isLoading ? (
           <>
-            <Text color="gray" dimColor={dimmed}>1-9</Text>
+            <Text color="gray" dimColor={dimmed}>{digestCount > 9 ? '0-9' : '1-9'}</Text>
             <Text color="white" dimColor={dimmed}> leer  </Text>
           </>
         ) : null}

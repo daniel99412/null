@@ -351,9 +351,9 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
-    // Number keys 1-9 open the corresponding article from the last news digest
-    if (!isLoading && /^[1-9]$/.test(char) && digestArticles.length > 0) {
-      const idx = parseInt(char, 10) - 1
+    // Number keys 0-9 open the corresponding article from the last news digest
+    if (!isLoading && /^[0-9]$/.test(char) && digestArticles.length > 0) {
+      const idx = char === '0' ? 9 : parseInt(char, 10) - 1
       const article = digestArticles[idx]
       if (article) {
         setReadingArticle(article)
