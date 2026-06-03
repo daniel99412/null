@@ -1,8 +1,8 @@
-import { tools } from './tools.js'
 import { fetchPageText } from '../tools/web-fetch.js'
+import { searchAndExtract } from '../tools/web-search.js'
+import type { SearchContext } from '../tools/web-search.js'
 import { routeQuery } from './router.js'
 import { getCachedSearch, setCachedSearch } from '../memory/search-cache.js'
-import type { SearchContext } from '../tools/web-search.js'
 import { buildSportsContext } from '../tools/espn.js'
 import type { ESPNScoreboard } from '../tools/espn.js'
 import {
@@ -16,8 +16,6 @@ import { buildSportsMemoryContext, buildGeneralMemoryContext } from '../memory/m
 import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/weather.js'
 import { getDefaultClient, type ChatMessage } from './llm-client.js'
 import { getNewsTopics } from '../memory/database.js'
-import type { ToolAction } from './toolAction.js'
-import { executeAction } from './execute.js'
 import { getRegistry } from '../mcp/registry.js'
 import type { OllamaToolFormat } from '../mcp/types.js'
 import { loadConfig, DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../config/index.js'
@@ -264,7 +262,7 @@ export async function performSearch(query: string, originalTxt: string): Promise
       debugLog('Using cached search results')
       searchCtx = cached
     } else {
-      searchCtx = await tools.web_search(query)
+      searchCtx = await searchAndExtract(query)
       debugLog(`DDG returned ${searchCtx.results.length} results, extract: ${searchCtx.extract ? 'yes' : 'no'}`)
 
       if (searchCtx.results.length === 0 && !searchCtx.extract) {
@@ -337,7 +335,13 @@ export async function processQuery(
   }
 
   if (decision === 'getDateTime') {
-    const t = tools.get_time()
+    const now = new Date()
+    const t = {
+      iso: now.toISOString(),
+      time: now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+      date: now.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+      day: now.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' }),
+    }
     return {
       userContent: `Current time: ${t.time}, date: ${t.date}. User asked: "${query}". Answer naturally.`,
       searchContext: null,
@@ -573,58 +577,6 @@ When you need information, call the appropriate tool.
 When you have enough information to answer the user, respond directly.
 Answer in the same language the user writes in.
 NEVER say you cannot access the internet — use the available tools to get current information.`
-
-/**
- * Parse a JSON tool call from LLM output.
- * Looks for a ```json ... ``` block or a bare top-level JSON object with an "action" key.
- * Returns null if the text is a normal (non-tool) response.
- */
-export function parseMaybeToolCall(text: string): ToolAction | null {
-  // Try ```json ... ``` block first
-  const blockMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/)
-  if (blockMatch) {
-    try {
-      const parsed: unknown = JSON.parse(blockMatch[1])
-      if (isToolAction(parsed)) return parsed
-    } catch {
-      // not valid JSON
-    }
-  }
-
-  // Try any JSON object containing "action" key anywhere in the text
-  const jsonMatch = text.match(/\{[^{}]*"action"\s*:\s*"[^"]+?"[^{}]*\}/)
-  if (jsonMatch) {
-    try {
-      const parsed: unknown = JSON.parse(jsonMatch[0])
-      if (isToolAction(parsed)) return parsed
-    } catch {
-      // not valid JSON
-    }
-  }
-
-  // Try bare JSON object covering most of the response
-  const trimmed = text.trim()
-  if (trimmed.startsWith('{')) {
-    const end = trimmed.lastIndexOf('}')
-    if (end !== -1) {
-      try {
-        const parsed: unknown = JSON.parse(trimmed.slice(0, end + 1))
-        if (isToolAction(parsed)) return parsed
-      } catch {
-        // not valid JSON
-      }
-    }
-  }
-
-  return null
-}
-
-function isToolAction(value: unknown): value is ToolAction {
-  if (typeof value !== 'object' || value === null) return false
-  const obj = value as Record<string, unknown>
-  const validActions = ['get_time', 'get_location', 'get_weather', 'web_search', 'web_fetch', 'sports_query', 'news_manage_topics', 'news_digest']
-  return typeof obj['action'] === 'string' && validActions.includes(obj['action'])
-}
 
 export interface ReActResult {
   /** Final answer text from LLM */
