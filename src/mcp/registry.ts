@@ -10,6 +10,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { nullToolDefinitions } from './null-tools.js'
+import { getSlashCommands } from '../core/tool-definitions.js'
+import type { SlashCommand } from '../core/tool-definitions.js'
 import type { MCPToolDefinition, MCPServerConfig, OllamaToolFormat, OllamaToolCallResponse } from './types.js'
 import { debugLog } from '../utils/debug.js'
 
@@ -128,6 +130,36 @@ class MCPRegistry {
     }
 
     return tools
+  }
+
+  /**
+   * Return slash commands for the slash menu (/ commands).
+   * Derived from internal tool definitions with showInSlashMenu: true.
+   */
+  getSlashCommands(): SlashCommand[] {
+    return getSlashCommands()
+  }
+
+  /**
+   * Return a list of all available tools (internal + external) with basic info.
+   */
+  listTools(): Array<{ name: string; description: string }> {
+    const result: Array<{ name: string; description: string }> = []
+
+    for (const [, def] of this.internalTools) {
+      result.push({ name: def.name, description: def.description })
+    }
+
+    for (const server of this.externalServers) {
+      for (const tool of server.tools) {
+        result.push({
+          name: `${server.name}__${tool.name}`,
+          description: tool.description ?? '',
+        })
+      }
+    }
+
+    return result
   }
 
   /**
