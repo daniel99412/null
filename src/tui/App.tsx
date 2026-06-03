@@ -36,6 +36,7 @@ import type { Session } from '../memory/sessions.js'
 import { runCleanup } from '../memory/cleanup.js'
 import { loadConfig, DEFAULT_MODEL, isFirstRun } from '../config/index.js'
 import { processQuery, processQueryWithReAct } from '../core/agent.js'
+import { cleanCaches } from '../memory/database.js'
 
 const MODEL = loadConfig().model ?? DEFAULT_MODEL
 
@@ -43,6 +44,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
   { id: 'theme', label: 'Theme', description: 'Change the accent color of the UI', shortcut: '' },
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
+  { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search, news, ESPN)', shortcut: '' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
@@ -324,6 +326,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       case 'theme':
         setOverlay('color-picker')
         break
+      case 'clean-caches': {
+        const deleted = cleanCaches()
+        const confirmMsg = `Cleared ${deleted} cached entries.`
+        updateMessages((m) => [...m, { role: 'assistant', content: confirmMsg } as ChatMessage])
+        setOverlay('none')
+        break
+      }
       case 'exit':
         handleExit()
         break

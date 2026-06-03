@@ -685,3 +685,16 @@ function seedNewsSources(database: Database.Database): void {
     `).run(...seedNames)
   }
 }
+
+export function cleanCaches(): number {
+  const db = getDb()
+  let total = 0
+
+  for (const table of ['search_cache', 'espn_cache', 'news_digest_cache', 'news_articles_cache']) {
+    const count = db.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }
+    db.prepare(`DELETE FROM ${table}`).run()
+    total += count.c
+  }
+
+  return total
+}

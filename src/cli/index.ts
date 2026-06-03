@@ -4,6 +4,7 @@ import { streamChat } from '../core/ollama.js'
 import { renderMarkdown } from '../utils/markdown.js'
 import { loadConfig, setAccentColor, saveConfig, setModel, type AccentColor } from '../config/index.js'
 import { checkHealth } from '../core/health.js'
+import { cleanCaches } from '../memory/database.js'
 import { runSetup } from './setup.js'
 import fs from 'fs'
 import path from 'path'
@@ -66,6 +67,15 @@ export function runCLI(): void {
         console.error(`Unknown key: ${key}. Valid keys: accent-color, weather-key, model`)
         process.exit(1)
       }
+    })
+
+  // Clean caches command
+  program
+    .command('clean')
+    .description('Clear all cached data (search, ESPN, news)')
+    .action(() => {
+      const deleted = cleanCaches()
+      console.log(`Cleared ${deleted} cached entries.`)
     })
 
   // Health check command
