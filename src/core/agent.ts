@@ -14,9 +14,13 @@ import { checkMemoryGate } from '../memory/memory-gate.js'
 import { extractMemoriesFromMessage } from '../memory/memory-extractor.js'
 import { buildSportsMemoryContext, buildGeneralMemoryContext } from '../memory/memory-retrieval.js'
 import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/weather.js'
-import { getDefaultClient } from './llm-client.js'
+import { getDefaultClient, type ChatMessage } from './llm-client.js'
+import { getNewsTopics } from '../memory/database.js'
 import type { ToolAction } from './toolAction.js'
 import { executeAction } from './execute.js'
+import { getRegistry } from '../mcp/registry.js'
+import type { OllamaToolFormat } from '../mcp/types.js'
+import { loadConfig, DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../config/index.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -480,15 +484,30 @@ export async function processQuery(
     }
   }
 
-  if (decision === 'mexicoNewsDigest') {
-    onStatus?.('Obteniendo noticias de México...')
+  if (decision === 'mexicoNewsDigest' || decision === 'newsDigest') {
+    const topicName = extractNewsTopic(query)
     try {
-      const { buildMexicoNewsDigest } = await import('../tools/mexico-news.js')
-      const digest = await buildMexicoNewsDigest(query)
+      const { buildTopicNewsDigest, buildAllTopicsDigest } = await import('../tools/mexico-news.js')
+
+      if (topicName) {
+        onStatus?.(`Obteniendo noticias de ${topicName}...`)
+        const digest = await buildTopicNewsDigest(topicName, query)
+        return {
+          userContent: query,
+          searchContext: null,
+          statusMessage: `Obteniendo noticias de ${topicName}...`,
+          directResponse: digest.formatted,
+          digestArticles: digest.articles,
+        }
+      }
+
+      // No specific topic detected — show all topics
+      onStatus?.('Obteniendo noticias de todos los temas...')
+      const digest = await buildAllTopicsDigest()
       return {
         userContent: query,
         searchContext: null,
-        statusMessage: 'Obteniendo noticias de México...',
+        statusMessage: 'Obteniendo noticias de todos los temas...',
         directResponse: digest.formatted,
         digestArticles: digest.articles,
       }
@@ -497,11 +516,45 @@ export async function processQuery(
       return {
         userContent: query,
         searchContext: null,
-        statusMessage: 'Obteniendo noticias de México...',
+        statusMessage: 'Obteniendo noticias...',
         directResponse: `No se pudo obtener el digest de noticias: ${msg}`,
       }
     }
   }
+
+// ─── News topic extraction ─────────────────────────────────────────────────
+
+/**
+ * Extract a news topic name from a user query.
+ * Returns null when no specific topic is mentioned — caller should show all topics.
+ */
+function extractNewsTopic(query: string): string | null {
+  const topics = getNewsTopics()
+  if (topics.length === 0) return null
+
+  const normalized = query.toLowerCase().trim()
+
+  // Check topic names first
+  for (const topic of topics) {
+    const topicName = topic.name.toLowerCase()
+    if (normalized.includes(topicName)) {
+      return topic.name
+    }
+  }
+
+  // Check topic keywords
+  for (const topic of topics) {
+    const keywords: string[] = JSON.parse(topic.keywords)
+    for (const kw of keywords) {
+      if (normalized.includes(kw.toLowerCase())) {
+        return topic.name
+      }
+    }
+  }
+
+  // No specific topic detected
+  return null
+}
 
   // decision === 'none' — answer directly from LLM knowledge (or via ReAct)
   return {
@@ -515,22 +568,11 @@ export async function processQuery(
 // ─── ReAct loop ───────────────────────────────────────────────────────────────
 
 const REACT_SYSTEM_PROMPT = `You are Null, a knowledgeable AI assistant running in a terminal.
-You have access to the following tools. When you need to use a tool, respond ONLY with a JSON block (no other text):
-
-\`\`\`json
-{"action": "<tool_name>", ...params}
-\`\`\`
-
-Available tools:
-- get_time: No params. Get current time and date.
-- get_weather: Optional {"city": "string"}. Get weather. Omit city to use IP location.
-- web_search: {"query": "string"}. Search the web for current info.
-- web_fetch: {"url": "string"}. Fetch readable text from a URL.
-- get_location: No params. Get current location via IP.
-
-When you have enough information to answer, respond normally (no JSON).
+You have access to tools that you can call to help answer the user.
+When you need information, call the appropriate tool.
+When you have enough information to answer the user, respond directly.
 Answer in the same language the user writes in.
-NEVER say you cannot access the internet — use the tools provided.`
+NEVER say you cannot access the internet — use the available tools to get current information.`
 
 /**
  * Parse a JSON tool call from LLM output.
@@ -580,7 +622,7 @@ export function parseMaybeToolCall(text: string): ToolAction | null {
 function isToolAction(value: unknown): value is ToolAction {
   if (typeof value !== 'object' || value === null) return false
   const obj = value as Record<string, unknown>
-  const validActions = ['get_time', 'get_location', 'get_weather', 'web_search', 'web_fetch', 'sports_query']
+  const validActions = ['get_time', 'get_location', 'get_weather', 'web_search', 'web_fetch', 'sports_query', 'news_manage_topics', 'news_digest']
   return typeof obj['action'] === 'string' && validActions.includes(obj['action'])
 }
 
@@ -603,6 +645,68 @@ export interface ReActResult {
  * @param onToolCall - Optional callback fired when a tool is about to execute
  * @param maxIterations - Max tool-call iterations (default: 3)
  */
+// ─── MCP tool-enabled Ollama call ─────────────────────────────────────────
+
+interface ReactCallResult {
+  content: string
+  toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }>
+}
+
+/**
+ * Non-streaming Ollama call with the `tools` parameter.
+ * Returns structured content + optional tool calls from the LLM.
+ */
+async function reactCall(
+  messages: { role: string; content: string }[],
+  tools: OllamaToolFormat[],
+  temperature?: number,
+): Promise<ReactCallResult> {
+  const config = loadConfig()
+  const baseUrl = config.ollamaUrl ?? DEFAULT_OLLAMA_URL
+  const model = config.model ?? DEFAULT_MODEL
+
+  const body: Record<string, unknown> = {
+    model,
+    stream: false,
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    tools,
+    options: temperature !== undefined ? { temperature } : undefined,
+  }
+
+  const res = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    throw new Error(`Ollama request failed: ${res.status}`)
+  }
+
+  const data = await res.json() as {
+    message?: {
+      content?: string
+      tool_calls?: Array<{
+        function: { name: string; arguments: string }
+      }>
+    }
+  }
+
+  const content = data.message?.content ?? ''
+
+  if (data.message?.tool_calls && data.message.tool_calls.length > 0) {
+    return {
+      content,
+      toolCalls: data.message.tool_calls.map(tc => ({
+        name: tc.function.name,
+        arguments: JSON.parse(tc.function.arguments),
+      })),
+    }
+  }
+
+  return { content }
+}
+
 /**
  * Detect whether a query is primarily Spanish or English.
  * Returns a language label suitable for injecting into prompts.
@@ -642,11 +746,16 @@ export async function processQueryWithReAct(
   maxIterations = 3,
 ): Promise<ReActResult> {
   const client = getDefaultClient()
+  const registry = getRegistry()
   const lang = detectQueryLanguage(query)
   const langInstruction = `IMPORTANT: Respond in ${lang}. The user wrote in ${lang} — always reply in ${lang} regardless of the language of the source material.`
 
   debugLog(`ReAct history length: ${history.length} messages`)
   history.forEach((m, i) => debugLog(`  [${i}] ${m.role}: ${m.content.slice(0, 60)}`))
+
+  // Get tool schemas from MCP registry for the Ollama tools parameter
+  const ollamaTools = registry.getOllamaTools()
+  debugLog(`[agent] ReAct using ${ollamaTools.length} tools from registry`)
 
   // Inject memory context into system prompt if available
   const memCtx = buildGeneralMemoryContext(query)
@@ -656,7 +765,7 @@ export async function processQueryWithReAct(
   if (memCtx) debugLog(`[agent] injected memory context:\n${memCtx}`)
 
   // Build message list: system + prior history + current user query
-  const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+  const messages: { role: string; content: string }[] = [
     { role: 'system', content: systemPrompt },
     ...history.map((m) => ({
       role: m.role as 'system' | 'user' | 'assistant',
@@ -665,39 +774,36 @@ export async function processQueryWithReAct(
     { role: 'user', content: query },
   ]
 
-  let hasExternalData = false  // becomes true once any tool result is injected
+  let hasExternalData = false
 
   for (let i = 0; i < maxIterations; i++) {
     debugLog(`ReAct iteration ${i + 1}/${maxIterations}`)
 
-    // Use lower temperature when grounding on external tool data to reduce hallucinations
-    const iterOptions = hasExternalData ? { temperature: 0.3 } : undefined
+    // Use lower temperature when grounding on external tool data
+    const temperature = hasExternalData ? 0.3 : undefined
 
-    // Non-streaming call so we can inspect the full response before acting
-    let fullResponse = ''
-    await client.streamChat(messages, (tok) => {
-      fullResponse += tok
-    }, iterOptions)
+    const response = await reactCall(messages, ollamaTools, temperature)
+    const fullContent = response.content
+    const toolCalls = response.toolCalls
 
-    debugLog(`ReAct LLM response: ${fullResponse.slice(0, 120)}...`)
+    debugLog(`ReAct LLM response: ${fullContent.slice(0, 100)}...${toolCalls ? ` (${toolCalls.length} tool calls)` : ' (text)'}`)
 
-    const toolCall = parseMaybeToolCall(fullResponse)
-
-    if (!toolCall) {
-      // Check if the LLM expressed uncertainty on the first iteration —
-      // if so, force a web_search rather than returning a vague answer.
-      if (i === 0 && looksUncertain(fullResponse)) {
+    if (!toolCalls || toolCalls.length === 0) {
+      // LLM produced a text response — check for uncertainty on first pass
+      if (i === 0 && looksUncertain(fullContent)) {
         debugLog('ReAct: LLM uncertain on first pass — forcing web_search')
         onStatus?.('Searching the web...')
         onToolCall?.('web_search')
         let searchObservation: string
         try {
-          const searchResult = await performSearch(query, query)
-          searchObservation = searchResult?.contextMessage ?? 'No results found.'
+          const searchResult = await registry.executeTool('web_search', { query })
+          searchObservation = typeof searchResult === 'string'
+            ? searchResult
+            : JSON.stringify(searchResult, null, 2)
         } catch (err) {
           searchObservation = `Search failed: ${err instanceof Error ? err.message : String(err)}`
         }
-        messages.push({ role: 'assistant', content: fullResponse })
+        messages.push({ role: 'assistant', content: fullContent })
         messages.push({
           role: 'user',
           content: `[Web search results for "${query}"]\n${searchObservation}\n\nNow answer the user's original question using the above data. Be specific and detailed.\n${langInstruction}`,
@@ -705,43 +811,48 @@ export async function processQueryWithReAct(
         hasExternalData = true
         continue
       }
-      // LLM produced a confident final answer
+      // Final answer
       debugLog(`ReAct final answer after ${i + 1} iteration(s)`)
-      return { answer: fullResponse, iterations: i + 1 }
+      return { answer: fullContent, iterations: i + 1 }
     }
 
-    // LLM wants to use a tool
-    const toolName = toolCall.action
-    debugLog(`ReAct tool call: ${toolName}`)
-    onToolCall?.(toolName)
+    // LLM wants to use one or more tools
+    for (const tc of toolCalls) {
+      const toolName = tc.name
+      debugLog(`ReAct tool call: ${toolName}`)
+      onToolCall?.(toolName)
 
-    const statusLabels: Record<string, string> = {
-      get_time: 'Getting time...',
-      get_weather: 'Getting weather...',
-      web_search: 'Searching the web...',
-      web_fetch: 'Fetching page...',
-      get_location: 'Getting location...',
-      sports_query: 'Fetching sports data...',
+      const statusLabels: Record<string, string> = {
+        get_time: 'Getting time...',
+        get_weather: 'Getting weather...',
+        web_search: 'Searching the web...',
+        web_fetch: 'Fetching page...',
+        get_location: 'Getting location...',
+        news_digest: 'Fetching news...',
+        news_manage_topics: 'Managing topics...',
+      }
+      onStatus?.(statusLabels[toolName] ?? `Running ${toolName}...`)
+
+      let observation: string
+      try {
+        const result = await registry.executeTool(toolName, tc.arguments)
+        observation = typeof result === 'string'
+          ? result
+          : JSON.stringify(result, null, 2)
+        debugLog(`ReAct tool result (${toolName}): ${observation.slice(0, 200)}`)
+      } catch (err) {
+        observation = `Error executing ${toolName}: ${err instanceof Error ? err.message : String(err)}`
+        debugLog(`ReAct tool error: ${observation}`)
+      }
+
+      // Add the assistant's response + the tool result to the message thread
+      messages.push({ role: 'assistant', content: fullContent || `[Calling tool: ${toolName}]` })
+      messages.push({
+        role: 'user',
+        content: `[Tool result for ${toolName}]\n${observation}\n\nNow answer the user's original question using the above data.\n${langInstruction}`,
+      })
+      hasExternalData = true
     }
-    onStatus?.(statusLabels[toolName] ?? `Running ${toolName}...`)
-
-    let observation: string
-    try {
-      const result = await executeAction(toolCall)
-      observation = JSON.stringify(result, null, 2)
-      debugLog(`ReAct tool result (${toolName}): ${observation.slice(0, 200)}`)
-    } catch (err) {
-      observation = `Error executing ${toolName}: ${err instanceof Error ? err.message : String(err)}`
-      debugLog(`ReAct tool error: ${observation}`)
-    }
-
-    // Add the assistant's tool call + the observation to the message thread
-    messages.push({ role: 'assistant', content: fullResponse })
-    messages.push({
-      role: 'user',
-      content: `[Tool result for ${toolName}]\n${observation}\n\nNow answer the user's original question using the above data.\n${langInstruction}`,
-    })
-    hasExternalData = true
   }
 
   // Exhausted iterations — ask LLM to produce a final answer with whatever it has
@@ -753,7 +864,7 @@ export async function processQueryWithReAct(
   })
 
   let finalAnswer = ''
-  await client.streamChat(messages, (tok) => {
+  await client.streamChat(messages as ChatMessage[], (tok: string) => {
     finalAnswer += tok
   }, hasExternalData ? { temperature: 0.3 } : undefined)
 

@@ -160,6 +160,63 @@ export async function fetchAllFeeds(concurrency = 6): Promise<NewsArticle[]> {
 }
 
 /**
+ * Fetch feeds whose scope_json overlaps with the given scopes.
+ * Falls back to cached articles (last 6h) if live fetch yields too few.
+ */
+export async function fetchFeedsByScope(scopes: string[], concurrency = 6): Promise<NewsArticle[]> {
+  if (scopes.length === 0) {
+    debugLog('[rss] empty scopes — fetching all feeds')
+    return fetchAllFeeds(concurrency)
+  }
+
+  const sources = getEnabledSources().filter((s) => {
+    if (!s.feed_url) return false
+    try {
+      const sourceScopes: string[] = JSON.parse(s.scope_json)
+      return sourceScopes.some((ss) => scopes.some((ts) => ss.includes(ts) || ts.includes(ss)))
+    } catch {
+      return false
+    }
+  })
+
+  debugLog(`[rss] fetching ${sources.length} feeds matching scopes [${scopes.join(', ')}]`)
+
+  const results: NewsArticle[] = []
+
+  for (let i = 0; i < sources.length; i += concurrency) {
+    const batch = sources.slice(i, i + concurrency)
+    const batchResults = await Promise.allSettled(batch.map((s) => fetchFeed(s)))
+    for (const r of batchResults) {
+      if (r.status === 'fulfilled') {
+        results.push(...r.value)
+      }
+    }
+  }
+
+  debugLog(`[rss] scope-filtered articles: ${results.length}`)
+  return results
+}
+
+/**
+ * Filter articles whose title or snippet matches any of the given keywords.
+ * Case-insensitive, matches on word boundaries.
+ */
+export function filterArticlesByKeywords(articles: NewsArticle[], keywords: string[]): NewsArticle[] {
+  if (keywords.length === 0) return articles
+
+  const patterns = keywords.map((kw) => new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i'))
+
+  return articles.filter((a) => {
+    const text = `${a.title} ${a.snippet}`
+    return patterns.some((p) => p.test(text))
+  })
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
  * Return cached articles from DB (fallback when live fetch fails or for rate-limit protection).
  * TTL: 6 hours.
  */

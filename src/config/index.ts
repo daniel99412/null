@@ -32,6 +32,12 @@ export interface CachedLocation {
   timezone: string
 }
 
+export interface MCPExternalServer {
+  command: string
+  args?: string[]
+  transport?: 'stdio'
+}
+
 export interface NullConfig {
   accentColor: AccentColor
   openWeatherApiKey?: string
@@ -41,6 +47,7 @@ export interface NullConfig {
   ollamaUrl?: string
   userName?: string
   setupCompleted?: boolean
+  mcpServers?: Record<string, MCPExternalServer>
 }
 
 const DEFAULT_CONFIG: NullConfig = {

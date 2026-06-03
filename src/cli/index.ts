@@ -1,11 +1,13 @@
 import { Command } from 'commander'
 import { runTUI } from '../tui/App.js'
-import { streamChat } from '../core/ollama.js'
-import { renderMarkdown } from '../utils/markdown.js'
-import { loadConfig, setAccentColor, saveConfig, setModel, type AccentColor } from '../config/index.js'
+import { processQuery } from '../core/agent.js'
 import { checkHealth } from '../core/health.js'
-import { cleanCaches } from '../memory/database.js'
 import { runSetup } from './setup.js'
+import { initMCPServers } from '../mcp/init.js'
+import { loadConfig, setAccentColor, setModel } from '../config/index.js'
+import type { AccentColor } from '../config/index.js'
+import { cleanCaches } from '../memory/database.js'
+import { getDefaultClient } from '../core/llm-client.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -122,6 +124,9 @@ export function runCLI(): void {
         process.stderr.write('\x1B[33mWarning:\x1B[0m No internet connection — web search will be unavailable.\n')
       }
 
+      // Initialize MCP servers (internal + external from config)
+      await initMCPServers()
+
       if (!promptParts || promptParts.length === 0) {
         runTUI(options.session)
         return
@@ -131,23 +136,38 @@ export function runCLI(): void {
 
       process.stdout.write('\x1B[36mnull\x1B[0m > ')
 
-      let buffer = ''
-      streamChat(prompt, (token) => {
-        buffer += token
-        process.stdout.write(token)
-      }).then(() => {
-        // Clear raw output and replace with styled markdown
-        const lines = buffer.split('\n').length + 1
-        process.stdout.write(`\x1B[${lines}A\x1B[J`)
-        console.log(renderMarkdown(buffer))
-      }).catch((err: Error) => {
-        console.error(
-          '\n\x1B[31mError:\x1B[0m Could not connect to Ollama. Is it running on localhost:11434?',
-        )
-        if (options.dev) {
-          console.error(err.message)
+      try {
+        const result = await processQuery(prompt, false, (msg) => {
+          process.stdout.write(`\n\x1B[90m${msg}\x1B[0m\n`)
+        })
+
+        if (result.directResponse) {
+          process.stdout.write('\n' + result.directResponse + '\n')
+          return
         }
-      })
+
+        // Send the processed context to LLM for a natural response
+        const systemContent = result.searchContext
+          ? `You are Null. Use the following data to answer the user.\n\n${result.searchContext}`
+          : 'You are Null, a helpful assistant. Answer concisely.'
+
+        const client = getDefaultClient()
+        let buffer = ''
+        await client.streamChat(
+          [
+            { role: 'system', content: systemContent },
+            { role: 'user', content: result.userContent },
+          ],
+          (token: string) => {
+            buffer += token
+            process.stdout.write(token)
+          },
+        )
+        process.stdout.write('\n')
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error('\n\x1B[31mError:\x1B[0m ' + msg)
+      }
     })
 
   program.parse()

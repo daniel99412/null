@@ -225,6 +225,18 @@ export function getDb(): Database.Database {
       expires_at TEXT NOT NULL,
       UNIQUE(scope, query)
     );
+
+    -- User-configurable news topics
+    CREATE TABLE IF NOT EXISTS news_topics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      keywords TEXT NOT NULL DEFAULT '[]',
+      scope_tags TEXT NOT NULL DEFAULT '[]',
+      source_ids TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `)
 
   // ── Schema migrations ──────────────────────────────────────────────────────
@@ -246,6 +258,10 @@ export function getDb(): Database.Database {
   // ── Seed news sources ──────────────────────────────────────────────────────
 
   seedNewsSources(db)
+
+  // ── Seed news topics ────────────────────────────────────────────────────────
+
+  seedNewsTopics(db)
 
   // ── Migrate user_preferences → memories ───────────────────────────────────
 
@@ -684,6 +700,99 @@ function seedNewsSources(database: Database.Database): void {
       WHERE name NOT IN (${placeholders})
     `).run(...seedNames)
   }
+}
+
+// ── News topics seed ──────────────────────────────────────────────────────────
+
+interface NewsTopicSeed {
+  name: string
+  keywords: string[]
+  scope_tags: string[]
+  source_ids?: number[]
+}
+
+const NEWS_TOPICS_SEED: NewsTopicSeed[] = [
+  {
+    name: 'México',
+    keywords: ['méxico', 'mexico', 'nacional', 'país'],
+    scope_tags: ['mexico', 'politics', 'security', 'economy'],
+  },
+  {
+    name: 'Internacional',
+    keywords: ['internacional', 'world', 'global', 'eeuu', 'china', 'europa', 'internacionales'],
+    scope_tags: ['world', 'latin-america', 'international-news'],
+  },
+  {
+    name: 'Finanzas',
+    keywords: ['finanzas', 'economía', 'economy', 'negocios', 'business', 'bolsa', 'dólar', 'empresas'],
+    scope_tags: ['economy', 'business'],
+  },
+  {
+    name: 'Tecnología',
+    keywords: ['tecnología', 'technology', 'tech', 'AI', 'inteligencia artificial', 'startup', 'digital', 'software'],
+    scope_tags: ['technology', 'science'],
+  },
+  {
+    name: 'Ciencia',
+    keywords: ['ciencia', 'science', 'investigación', 'research', 'salud', 'health', 'medio ambiente', 'environment'],
+    scope_tags: ['science', 'health', 'environment'],
+  },
+]
+
+export interface NewsTopicRow {
+  id: number
+  name: string
+  keywords: string
+  scope_tags: string
+  source_ids: string
+  enabled: number
+  created_at: string
+  updated_at: string
+}
+
+function seedNewsTopics(database: Database.Database): void {
+  const upsert = database.prepare(`
+    INSERT INTO news_topics (name, keywords, scope_tags, source_ids, enabled)
+    VALUES (?, ?, ?, ?, 1)
+    ON CONFLICT(name) DO UPDATE SET
+      keywords = excluded.keywords,
+      scope_tags = excluded.scope_tags,
+      updated_at = CURRENT_TIMESTAMP
+  `)
+  const insertMany = database.transaction((rows: NewsTopicSeed[]) => {
+    for (const row of rows) {
+      upsert.run(row.name, JSON.stringify(row.keywords), JSON.stringify(row.scope_tags), JSON.stringify(row.source_ids ?? []))
+    }
+  })
+  insertMany(NEWS_TOPICS_SEED)
+}
+
+export function getNewsTopics(): NewsTopicRow[] {
+  const db = getDb()
+  return db.prepare('SELECT * FROM news_topics WHERE enabled = 1 ORDER BY name').all() as NewsTopicRow[]
+}
+
+export function getNewsTopicByName(name: string): NewsTopicRow | null {
+  const db = getDb()
+  return db.prepare('SELECT * FROM news_topics WHERE enabled = 1 AND name = ?').get(name) as NewsTopicRow | null
+}
+
+export function upsertNewsTopic(name: string, keywords: string[], scope_tags?: string[], source_ids?: number[]): void {
+  const db = getDb()
+  db.prepare(`
+    INSERT INTO news_topics (name, keywords, scope_tags, source_ids, enabled)
+    VALUES (?, ?, ?, ?, 1)
+    ON CONFLICT(name) DO UPDATE SET
+      keywords = excluded.keywords,
+      scope_tags = excluded.scope_tags,
+      source_ids = excluded.source_ids,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(name, JSON.stringify(keywords), JSON.stringify(scope_tags ?? []), JSON.stringify(source_ids ?? []))
+}
+
+export function deleteNewsTopic(name: string): void {
+  const db = getDb()
+  db.prepare("UPDATE news_topics SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE name = ?").run(name)
 }
 
 export function cleanCaches(): number {

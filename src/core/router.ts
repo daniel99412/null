@@ -4,7 +4,7 @@ import { getSportsAliases } from '../memory/memory-store.js'
 import { classifyIntent } from './intent-classifier.js'
 import type { CLLMResult } from './intent-classifier.js'
 
-export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'savePreference' | 'mexicoNewsDigest' | 'none'
+export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'savePreference' | 'mexicoNewsDigest' | 'newsDigest' | 'none'
 
 export interface RouterResult {
   decision: RoutingDecision
@@ -122,20 +122,20 @@ const SIGNALS: Signal[] = [
   { pattern: /\bI('m| am) a(n?)? .+ fan\b/i, intent: 'savePreference', weight: 15, description: 'I am a fan (EN)' },
   { pattern: /\bI (support|follow|root for)\b/i, intent: 'savePreference', weight: 12, description: 'I support/follow (EN)' },
 
-  // ── MEXICONEWSDIGEST — general Mexico news queries ────────────────────────
-  { pattern: /\b(dame|d[aá]me)\b.*\b(las?\s+)?noticias?\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'dame las noticias' },
-  { pattern: /\b(me\s+)?(das?|puedes? darme?|puedes?\s+darme|me\s+das)\b.*\b(las?\s+)?noticias?\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'me das las noticias' },
-  { pattern: /\bqué\s+pas[oó]\s+(hoy|esta semana|ayer)\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'qué pasó hoy' },
-  { pattern: /\b(que|qué)\s+pas[oó]\s+(hoy|esta semana|ayer)\b/i, intent: 'mexicoNewsDigest', weight: 20, description: 'que paso hoy' },
-  { pattern: /\b(resumen|digest)\b.*\bnoticias?\b/i, intent: 'mexicoNewsDigest', weight: 18, description: 'resumen de noticias' },
-  { pattern: /\bnoticias?\b.*\b(resumen|digest)\b/i, intent: 'mexicoNewsDigest', weight: 18, description: 'noticias resumen' },
-  { pattern: /\b(últimas?|últimos?)\b.*\bnoticias?\b/i, intent: 'mexicoNewsDigest', weight: 16, description: 'últimas noticias' },
-  { pattern: /\bnoticias?\b.*\b(últimas?|recientes?|importantes?)\b/i, intent: 'mexicoNewsDigest', weight: 16, description: 'noticias importantes' },
-  { pattern: /\bnoticias?\b.*\b(de\s+)?m[eé]xico\b/i, intent: 'mexicoNewsDigest', weight: 16, description: 'noticias de México' },
-  { pattern: /\bnoticias?\b.*\b(del\s+)?mundo\b.*\b(afeitan?|impactan?|para)\b.*m[eé]xico\b/i, intent: 'mexicoNewsDigest', weight: 16, description: 'noticias del mundo para México' },
-  { pattern: /\bqué\s+(hay|hubo)\s+(de\s+)?nuevo\b/i, intent: 'mexicoNewsDigest', weight: 14, description: 'qué hay de nuevo' },
-  { pattern: /\b(ponme|p[oó]nme)\b.*\balnoticias?\b/i, intent: 'mexicoNewsDigest', weight: 14, description: 'ponme al día' },
-  { pattern: /\bqué\s+(se\s+)?(sabe|dice)\s+(hoy|del?\s+(día|mundo))\b/i, intent: 'mexicoNewsDigest', weight: 14, description: 'qué se sabe hoy' },
+  // ── NEWSDIGEST — topic-specific news queries ────────────────────────────
+  { pattern: /\b(dame|d[aá]me)\b.*\b(las?\s+)?noticias?\b/i, intent: 'newsDigest', weight: 20, description: 'dame las noticias' },
+  { pattern: /\b(me\s+)?(das?|puedes? darme?|puedes?\s+darme|me\s+das)\b.*\b(las?\s+)?noticias?\b/i, intent: 'newsDigest', weight: 20, description: 'me das las noticias' },
+  { pattern: /\bqu[eé]\s+pas[oó]\s+(hoy|esta semana|ayer)\b/i, intent: 'newsDigest', weight: 20, description: 'que pasó hoy' },
+  { pattern: /\b(que|qu[eé])\s+pas[oó]\s+(hoy|esta semana|ayer)\b/i, intent: 'newsDigest', weight: 20, description: 'que paso hoy' },
+  { pattern: /\b(resumen|digest)\b.*\bnoticias?\b/i, intent: 'newsDigest', weight: 18, description: 'resumen de noticias' },
+  { pattern: /\bnoticias?\b.*\b(resumen|digest)\b/i, intent: 'newsDigest', weight: 18, description: 'noticias resumen' },
+  { pattern: /\b(últimas?|últimos?)\b.*\bnoticias?\b/i, intent: 'newsDigest', weight: 16, description: 'últimas noticias' },
+  { pattern: /\bnoticias?\b.*\b(últimas?|recientes?|importantes?)\b/i, intent: 'newsDigest', weight: 16, description: 'noticias importantes' },
+  { pattern: /\bnoticias?\b.*\b(de\s+)?(m[eé]xico|internacional|finanzas?|tecnolog[ií]a|ciencia|deportes?|salud)\b/i, intent: 'newsDigest', weight: 16, description: 'noticias de un topic' },
+  { pattern: /\b(ponme|p[oó]nme)\b.*\bal\b.*\b(d[ií]a|noticias?)\b/i, intent: 'newsDigest', weight: 14, description: 'ponme al día' },
+  { pattern: /\bqu[eé]\s+(se\s+)?(sabe|dice)\s+(hoy|del?\s+(d[ií]a|mundo))\b/i, intent: 'newsDigest', weight: 14, description: 'que se sabe hoy' },
+  { pattern: /\b(noticias?|novedades?)\s+(de\s+)?(sobre\s+)?\w{3,}/i, intent: 'newsDigest', weight: 12, description: 'noticias de [algo] generico' },
+  { pattern: /(?:^|\s)(qu[eé])\s+(pas[oó]|hay|hubo)\s+(en|de)\s+(tecnolog[ií]a|finanzas?|ciencia|salud|deportes?|internacional|econom[ií]a|negocios|pol[ií]tica|seguridad|educaci[oó]n|cultura)\b/i, intent: 'newsDigest', weight: 18, description: 'que paso en [topic]' },
 
   // ── WEBSEARCH — recency / news ────────────────────────────────────────────
   { pattern: /\b(20[2-9][4-9]|20[3-9]\d)\b/, intent: 'webSearch', weight: 10, description: 'year post-cutoff' },
@@ -171,6 +171,7 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
     sportsQuery: 0,
     savePreference: 0,
     mexicoNewsDigest: 0,
+    newsDigest: 0,
     none: 0,
   }
 

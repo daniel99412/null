@@ -9,13 +9,15 @@
  *   5. Save to digest cache
  */
 
-import { fetchAllFeeds, getCachedArticles } from './rss-fetcher.js'
+import { fetchAllFeeds, fetchFeedsByScope, filterArticlesByKeywords, getCachedArticles } from './rss-fetcher.js'
 import { clusterArticles } from './news-cluster.js'
 import { rankStories } from './news-rank.js'
 import { analyzeBias } from './news-bias.js'
 import { fetchPageText } from './web-fetch.js'
+import { searchWeb } from './web-search.js'
 import type { NewsStory } from './news-cluster.js'
-import { getDb } from '../memory/database.js'
+import type { NewsArticle } from './rss-fetcher.js'
+import { getDb, getNewsTopics, getNewsTopicByName, type NewsTopicRow } from '../memory/database.js'
 import { debugLog } from '../utils/debug.js'
 
 // Module augmentation: add the optional `enrichedContent` field filled by
@@ -192,15 +194,17 @@ function formatCard(story: NewsStory): string {
   return lines.join('\n')
 }
 
-function formatDigest(stories: NewsStory[], fetchedAt: Date): string {
+function formatDigest(stories: NewsStory[], fetchedAt: Date, topicName = 'México'): string {
   const dateStr = fetchedAt.toLocaleString('es-MX', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
 
+  const headerLabel = `RESUMEN DE NOTICIAS — ${topicName.toUpperCase()}`
+
   const header = [
     `╔══════════════════════════════════════════════════╗`,
-    `║         RESUMEN DE NOTICIAS — MÉXICO             ║`,
+    `║  ${headerLabel.padEnd(46)}  ║`,
     `║  ${dateStr.slice(0, 46).padEnd(46)}  ║`,
     `╚══════════════════════════════════════════════════╝`,
     '',
@@ -237,36 +241,145 @@ export interface DigestResult {
   articles: DigestArticle[]
 }
 
+/**
+ * Strategy 3: Fallback web search when DB feeds don't yield enough articles
+ * for a topic. Searches DuckDuckGo for the topic, fetches top results via
+ * fetchPageText (which uses curl_cffi for Cloudflare-bypass as last resort),
+ * and normalizes them into NewsArticle[].
+ */
+async function fetchNewsViaWebSearch(topicName: string, keywords: string[]): Promise<NewsArticle[]> {
+  const query = `noticias ${keywords.slice(0, 3).join(' ')} ${topicName}`
+  debugLog(`[news-digest] web search fallback: "${query}"`)
+
+  try {
+    const results = await searchWeb(query, 8)
+    if (results.length === 0) {
+      debugLog('[news-digest] web search returned 0 results')
+      return []
+    }
+
+    const fetched = await Promise.allSettled(
+      results.map(async (r) => {
+        try {
+          const text = await fetchPageText(r.url, { maxChars: 3000 })
+          return {
+            source: extractDomain(r.url),
+            sourceId: 0,
+            biasBase: 0,
+            reliability: 0.5,
+            title: r.title,
+            url: r.url,
+            snippet: text || r.snippet,
+            publishedAt: '',
+          } as NewsArticle
+        } catch {
+          return null
+        }
+      }),
+    )
+
+    const articles: NewsArticle[] = []
+    for (const r of fetched) {
+      if (r.status === 'fulfilled' && r.value) {
+        articles.push(r.value)
+      }
+    }
+
+    debugLog(`[news-digest] web search produced ${articles.length} articles`)
+    return articles
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    debugLog(`[news-digest] web search fallback error: ${msg}`)
+    return []
+  }
+}
+
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return 'Web'
+  }
+}
+
+/**
+ * Backward-compatible wrapper — builds digest for the 'México' topic.
+ */
 export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestResult> {
-  const scope = 'mexico'
+  return buildTopicNewsDigest('México', query)
+}
+
+/**
+ * Build a news digest for a specific topic.
+ * Looks up the topic in DB, fetches relevant feeds, clusters, ranks, and formats.
+ */
+export async function buildTopicNewsDigest(topicName: string, query?: string): Promise<DigestResult> {
+  const topic = getNewsTopicByName(topicName)
+  if (!topic) {
+    const formatted = `Topic "${topicName}" no encontrado. Topics disponibles: ${getNewsTopics().map(t => t.name).join(', ')}`
+    return { formatted, articles: [] }
+  }
+
+  const keywords: string[] = JSON.parse(topic.keywords)
+  const scopeTags: string[] = JSON.parse(topic.scope_tags)
+  const sourceIds: number[] = JSON.parse(topic.source_ids)
+
   // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
-  const DIGEST_FORMAT_VERSION = 'v7'
-  const cacheKey = `${DIGEST_FORMAT_VERSION}:${query.toLowerCase().trim().slice(0, 80)}`
+  const DIGEST_FORMAT_VERSION = 'v8'
+  const cacheKey = `${DIGEST_FORMAT_VERSION}:${topicName.toLowerCase().trim()}:${(query ?? '').toLowerCase().trim().slice(0, 40)}`
 
   // Check digest cache first
-  const cached = getDigestCache(scope, cacheKey)
+  const cached = getDigestCache(topicName, cacheKey)
   if (cached) {
-    debugLog('[news-digest] serving from cache')
+    debugLog(`[news-digest] serving from cache for topic "${topicName}"`)
     return cached
   }
 
-  debugLog('[news-digest] building fresh digest...')
+  debugLog(`[news-digest] building fresh digest for topic "${topicName}"`)
   const fetchedAt = new Date()
 
-  // Fetch live RSS feeds; fall back to cached articles if fetch yields nothing
-  let articles = await fetchAllFeeds()
-  if (articles.length < 5) {
-    debugLog('[news-digest] live fetch returned few results, supplementing with cache')
-    const cached6h = getCachedArticles(6)
-    const existingUrls = new Set(articles.map((a) => a.url))
-    articles = [...articles, ...cached6h.filter((a) => !existingUrls.has(a.url))]
+  // Strategy 1: Fetch feeds by scope tags + keyword filter
+  let articles: NewsArticle[] = []
+  if (scopeTags.length > 0) {
+    articles = await fetchFeedsByScope(scopeTags)
+    if (keywords.length > 0) {
+      const filtered = filterArticlesByKeywords(articles, keywords)
+      debugLog(`[news-digest] scope fetch: ${articles.length} total, ${filtered.length} after keyword filter`)
+      articles = filtered
+    }
   }
 
-  debugLog(`[news-digest] total articles: ${articles.length}`)
+  // Strategy 2: If too few results, fetch all feeds + keyword filter
+  if (articles.length < 5) {
+    debugLog('[news-digest] scope fetch yielded few results — falling back to all feeds + keyword filter')
+    let allArticles = await fetchAllFeeds()
+    const cached6h = getCachedArticles(6)
+    const existingUrls = new Set(allArticles.map((a) => a.url))
+    allArticles = [...allArticles, ...cached6h.filter((a) => !existingUrls.has(a.url))]
+
+    if (keywords.length > 0) {
+      articles = filterArticlesByKeywords(allArticles, keywords)
+    } else {
+      articles = allArticles
+    }
+    debugLog(`[news-digest] fallback fetch: ${allArticles.length} total, ${articles.length} after filter`)
+  }
+
+  // Strategy 3: If still too few results, fall back to web search
+  if (articles.length < 5) {
+    debugLog('[news-digest] DB feeds insufficient — falling back to web search')
+    const webArticles = await fetchNewsViaWebSearch(topicName, keywords)
+    if (webArticles.length > 0) {
+      const existingUrls = new Set(articles.map((a) => a.url))
+      const newArticles = webArticles.filter((a) => !existingUrls.has(a.url))
+      articles = [...articles, ...newArticles]
+      debugLog(`[news-digest] web search added ${newArticles.length} articles (total: ${articles.length})`)
+    }
+  }
 
   if (articles.length === 0) {
     return {
-      formatted: 'No se pudieron obtener noticias. Verifica tu conexión a internet e intenta de nuevo.',
+      formatted: `No se encontraron noticias para "${topicName}". Intenta de nuevo más tarde.`,
       articles: [],
     }
   }
@@ -290,10 +403,9 @@ export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestRes
   debugLog(`[news-digest] top ${ranked.length} stories selected`)
 
   // Enrich the top 3 stories with full-page content for richer summaries.
-  // +1 fetch in parallel = ~4s added (4s default timeout in fetchPageText).
   await enrichTopStories(ranked, 3)
 
-  const formatted = formatDigest(ranked, fetchedAt)
+  const formatted = formatDigest(ranked, fetchedAt, topicName)
 
   // Build the article list — pick the best article per story (highest reliability)
   const articlesList: DigestArticle[] = ranked.map((story, i) => {
@@ -307,9 +419,35 @@ export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestRes
     }
   })
 
-  // Cache the full result (formatted + articles) so the reader keeps working
-  // on subsequent requests within the TTL window.
-  setDigestCache(scope, cacheKey, { formatted, articles: articlesList })
+  // Cache the full result
+  setDigestCache(topicName, cacheKey, { formatted, articles: articlesList })
 
   return { formatted, articles: articlesList }
+}
+
+/**
+ * Show available topics when no specific topic was requested.
+ */
+export async function buildAllTopicsDigest(): Promise<DigestResult> {
+  const topics = getNewsTopics()
+  if (topics.length === 0) {
+    return { formatted: 'No hay topics configurados. Agrega uno con "agrega el topic {nombre}".', articles: [] }
+  }
+
+  const topicsList = topics.map(t => `  ${t.name} — ${JSON.parse(t.keywords).slice(0, 3).join(', ')}`).join('\n')
+
+  const formatted = [
+    '╔══════════════════════════════════════════════════╗',
+    '║         RESUMEN DE NOTICIAS                      ║',
+    `║  ${new Date().toLocaleString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).slice(0, 46).padEnd(46)}  ║`,
+    '╚══════════════════════════════════════════════════╝',
+    '',
+    'Temas disponibles:',
+    topicsList,
+    '',
+    'Ejemplo: "dame noticias de tecnología"',
+    '         "qué pasó en finanzas"',
+  ].join('\n')
+
+  return { formatted, articles: [] }
 }

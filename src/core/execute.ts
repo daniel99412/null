@@ -10,10 +10,6 @@ export async function executeAction(action: ToolAction): Promise<unknown> {
       return tools.get_location()
 
     case 'get_weather':
-      if (action.city) {
-        // city-specific weather not yet in tools registry — return basic weather
-        return tools.get_weather()
-      }
       return tools.get_weather()
 
     case 'web_search':
@@ -25,5 +21,11 @@ export async function executeAction(action: ToolAction): Promise<unknown> {
     case 'sports_query':
       // sports tool dispatched via ESPN directly in agent — return stub
       return { query: action.query }
+
+    case 'news_manage_topics':
+      return tools.news_manage_topics(action.sub_action, action.name, action.keywords)
+
+    case 'news_digest':
+      return tools.news_digest(action.topic)
   }
 }
