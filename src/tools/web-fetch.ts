@@ -131,32 +131,42 @@ function extractTables(html: string): string {
 }
 
 /**
- * Try to extract the main content area from HTML using common semantic tags.
- * Uses greedy matching and picks the largest match.
+ * Try to extract the main content area from HTML using common semantic tags
+ * and class/id patterns found across news sites (US, MX, EU outlets).
+ * Picks the largest match whose stripped text is >200 chars.
  */
 function extractMainContent(html: string): string | null {
-  const patterns = [
-    /<article[^>]*>([\s\S]+)<\/article>/i,
-    /<main[^>]*>([\s\S]+)<\/main>/i,
-    /<div[^>]*class="[^"]*(?:article-body|entry-content|post-content|story-body|article-content)[^"]*"[^>]*>([\s\S]+?)<\/div>\s*(?:<div|<\/section|<\/main|<footer)/i,
+  const patterns: RegExp[] = [
+    // Schema.org microdata
+    /<div[^>]*itemprop="articleBody"[^>]*>([\s\S]+?)<\/div>/i,
+    /<section[^>]*itemprop="articleBody"[^>]*>([\s\S]+?)<\/section>/i,
+    // Common news-site class names
+    /<div[^>]*class="[^"]*(?:article-body|article-body__content|entry-content|post-content|story-body|article-content|article__body|article__content|news-body|content-body|main-content|page-content|nota-contenido|nota-cuerpo|cuerpo-nota|article-text|article__text|article-wrapper|post-body|article-inner)[^"]*"[^>]*>([\s\S]+?)<\/div>/i,
+    /<section[^>]*class="[^"]*(?:article-body|entry-content|post-content|story-body|article-content|article__body|article__content|news-body|content-body|main-content)[^"]*"[^>]*>([\s\S]+?)<\/section>/i,
+    // Semantic <article> and <main>
+    /<article[^>]*>([\s\S]+?)<\/article>/i,
+    /<main[^>]*role="main"[^>]*>([\s\S]+?)<\/main>/i,
+    /<main[^>]*>([\s\S]+?)<\/main>/i,
   ]
 
   let bestMatch: string | null = null
-  let bestLength = 0
+  let bestTextLength = 0
 
   for (const pattern of patterns) {
+    // For the <article>/<main> greedy patterns, use a non-greedy variant that
+    // stops at the first nested </article> or </main>.
     const match = html.match(pattern)
-    if (match && match[1].length > bestLength) {
-      bestMatch = match[1]
-      bestLength = match[1].length
+    if (match && match[1]) {
+      const stripped = match[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      if (stripped.length > bestTextLength) {
+        bestMatch = match[1]
+        bestTextLength = stripped.length
+      }
     }
   }
 
-  if (bestMatch) {
-    const stripped = bestMatch.replace(/<[^>]+>/g, '').trim()
-    if (stripped.length > 200) {
-      return bestMatch
-    }
+  if (bestMatch && bestTextLength > 200) {
+    return bestMatch
   }
 
   return null
@@ -173,15 +183,29 @@ function extractText(html: string, maxChars: number): string {
   text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
   text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
   text = text.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
+  text = text.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '')
 
   // Remove HTML comments
   text = text.replace(/<!--[\s\S]*?-->/g, '')
+
+  // Drop social media embeds — their text is metadata noise
+  // ("View this post on Instagram", fake author names, etc.) that bleeds
+  // into the extracted article.
+  text = text.replace(/<blockquote[^>]*class="[^"]*(instagram-media|twitter-tweet|tiktok-embed|fb-post|fb-video)[^"]*"[^>]*>[\s\S]*?<\/blockquote>/gi, '')
+  text = text.replace(/<div[^>]*class="[^"]*(instagram-media|twitter-tweet|tiktok-embed|fb-post|fb-video)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
+  text = text.replace(/<iframe[^>]*(instagram\.com|platform\.twitter\.com|facebook\.com|embed\.tiktok\.com|player\.vimeo\.com|youtube\.com|youtu\.be)[^>]*>[\s\S]*?<\/iframe>/gi, '')
+  text = text.replace(/<iframe[^>]*src="[^"]*(instagram\.com|platform\.twitter\.com|facebook\.com|embed\.tiktok\.com|player\.vimeo\.com)[^"]*"[^>]*\/?>/gi, '')
 
   // Remove nav, header, footer elements (navigation noise)
   text = text.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
   text = text.replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
   text = text.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
   text = text.replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+
+  // Drop "related articles" / "more from" sections that mix content from
+  // other stories.
+  text = text.replace(/<div[^>]*class="[^"]*(?:related|related-stories|related-articles|more-from|read-more|recommended|related-posts|you-may-also-like|also-read|teaser|recomendados|relacionadas|mas-de|te-puede-interesar)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '')
+  text = text.replace(/<section[^>]*class="[^"]*(?:related|related-stories|related-articles|more-from|read-more|recommended|related-posts|you-may-also-like|also-read|teaser|recomendados|relacionadas|mas-de|te-puede-interesar)[^"]*"[^>]*>[\s\S]*?<\/section>/gi, '')
 
   // Extract tables BEFORE stripping tags (preserve structure)
   const tableText = extractTables(text)

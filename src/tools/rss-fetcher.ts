@@ -224,8 +224,14 @@ function persistArticles(sourceId: number, articles: NewsArticle[], db: ReturnTy
 function stripHtml(html: string): string {
   if (!html) return ''
   return html
-    // Drop script/style/noscript blocks entirely (their text isn't article content)
-    .replace(/<(script|style|noscript|svg|iframe)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    // Drop social media embeds (their text is metadata like "View this post
+    // on Instagram" or fake author names — not article content).
+    .replace(/<blockquote[^>]*class="[^"]*(instagram-media|twitter-tweet|tiktok-embed|fb-post|fb-video)[^"]*"[^>]*>[\s\S]*?<\/blockquote>/gi, ' ')
+    // Drop script/style/noscript/svg/iframe blocks entirely
+    .replace(/<(script|style|noscript|svg|iframe|figure)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<img[^>]*alt="([^"]*)"[^>]*\/?>/gi, (_m, alt) => (alt ? ` ${alt} ` : ' '))
+    // Drop <aside>, <nav>, <header>, <footer> — typically sidebar/related content
+    .replace(/<(aside|nav|header|footer|form|button)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
     // Strip remaining tags
     .replace(/<[^>]+>/g, ' ')
     // Decode common HTML entities
