@@ -13,9 +13,19 @@ import { fetchAllFeeds, getCachedArticles } from './rss-fetcher.js'
 import { clusterArticles } from './news-cluster.js'
 import { rankStories } from './news-rank.js'
 import { analyzeBias } from './news-bias.js'
+import { fetchPageText } from './web-fetch.js'
 import type { NewsStory } from './news-cluster.js'
 import { getDb } from '../memory/database.js'
 import { debugLog } from '../utils/debug.js'
+
+// Module augmentation: add the optional `enrichedContent` field filled by
+// enrichTopStories() so the digest summary uses the full article body when
+// available, not just the RSS snippet.
+declare module './news-cluster.js' {
+  interface NewsStory {
+    enrichedContent?: string
+  }
+}
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
 
@@ -59,7 +69,14 @@ function formatRecency(minutesAgo: number, publishedAt: string): string {
 }
 
 function buildNeutralSummary(story: NewsStory): string {
-  // Pick the LONGEST snippet among the top 3 most reliable articles.
+  // Prefer enriched (full-page) content when available — it gives a much more
+  // complete summary than the RSS snippet alone.
+  if (story.enrichedContent && story.enrichedContent.length >= 100) {
+    const clean = story.enrichedContent.replace(/\s+/g, ' ').trim()
+    return clean.slice(0, 450).replace(/\s+\S*$/, '') + (clean.length > 450 ? '…' : '')
+  }
+
+  // Fallback: pick the LONGEST snippet among the top 3 most reliable articles.
   // Longer snippets usually have more context, even if from a slightly
   // less-reliable source. Falls back to title when snippets are too short.
   const sorted = [...story.articles].sort((a, b) => b.reliability - a.reliability)
@@ -69,13 +86,39 @@ function buildNeutralSummary(story: NewsStory): string {
     .filter((s) => s && s.length >= 20)
 
   if (candidates.length === 0) {
-    // No usable snippet — use the title as the summary instead.
     return story.title
   }
 
-  // Pick the longest candidate
   const best = candidates.reduce((a, b) => (b.length > a.length ? b : a))
-  return best.slice(0, 220).replace(/\s+$/, '') + (best.length > 220 ? '…' : '')
+  return best.slice(0, 300).replace(/\s+\S*$/, '') + (best.length > 300 ? '…' : '')
+}
+
+/**
+ * Fetch full article content for the top N stories in parallel.
+ * Mutates each story by setting `enrichedContent` when the fetch succeeds.
+ * Failures are silently swallowed — the digest falls back to RSS snippets.
+ */
+async function enrichTopStories(stories: NewsStory[], count: number): Promise<void> {
+  const targets = stories.slice(0, count)
+  debugLog(`[news-digest] enriching top ${targets.length} stories with full-page fetch`)
+
+  await Promise.allSettled(
+    targets.map(async (story) => {
+      // Pick the most reliable article URL to fetch
+      const best = [...story.articles].sort((a, b) => b.reliability - a.reliability)[0]
+      if (!best) return
+      try {
+        const text = await fetchPageText(best.url, { maxChars: 3000 })
+        if (text && text.length >= 100) {
+          story.enrichedContent = text
+          debugLog(`[news-digest] enriched "${story.title.slice(0, 40)}…" (${text.length} chars)`)
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        debugLog(`[news-digest] enrich failed for ${best.url}: ${msg}`)
+      }
+    }),
+  )
 }
 
 // Wrap text to a max line width, breaking on word boundaries.
@@ -127,7 +170,7 @@ function formatCard(story: NewsStory): string {
     : `${story.articles.length} medios`
 
   // Card interior width (between │ characters). Tuned for ~80-col terminals.
-  const CONTENT_WIDTH = 64
+  const CONTENT_WIDTH = 72
 
   const titularLines = wrapWithPrefix(story.title, '│ ', CONTENT_WIDTH)
   const resumenLines = wrapWithPrefix(`Resumen: ${summary}`, '│ ', CONTENT_WIDTH)
@@ -197,7 +240,7 @@ export interface DigestResult {
 export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestResult> {
   const scope = 'mexico'
   // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
-  const DIGEST_FORMAT_VERSION = 'v4'
+  const DIGEST_FORMAT_VERSION = 'v5'
   const cacheKey = `${DIGEST_FORMAT_VERSION}:${query.toLowerCase().trim().slice(0, 80)}`
 
   // Check digest cache first
@@ -245,6 +288,10 @@ export async function buildMexicoNewsDigest(query = 'mexico'): Promise<DigestRes
 
   const ranked = rankStories(stories).slice(0, 10)
   debugLog(`[news-digest] top ${ranked.length} stories selected`)
+
+  // Enrich the top 3 stories with full-page content for richer summaries.
+  // +1 fetch in parallel = ~4s added (4s default timeout in fetchPageText).
+  await enrichTopStories(ranked, 3)
 
   const formatted = formatDigest(ranked, fetchedAt)
 

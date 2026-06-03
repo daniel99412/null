@@ -89,9 +89,17 @@ export async function fetchFeed(source: NewsSource): Promise<NewsArticle[]> {
       const url = (item.link ?? item.guid ?? '').trim()
       if (!title || !url) continue
 
-      const snippet = stripHtml(
-        (item.contentSnippet ?? item.content ?? (item as unknown as Record<string, string>)['mediaDescription'] ?? item.summary ?? '').slice(0, 400),
-      ).trim()
+      // Prefer richer sources: full HTML content > mediaDescription > contentSnippet > summary.
+      // Many feeds only ship a short contentSnippet (~200 chars); when `content` is available
+      // we get the full article HTML, which stripHtml converts to a much longer readable text.
+      const rawContent =
+        item.content ??
+        (item as unknown as Record<string, string>)['mediaDescription'] ??
+        item.contentSnippet ??
+        item.summary ??
+        ''
+
+      const snippet = stripHtml(rawContent).slice(0, 1500).trim()
 
       const publishedAt = item.isoDate ?? item.pubDate ?? ''
 
@@ -214,7 +222,23 @@ function persistArticles(sourceId: number, articles: NewsArticle[], db: ReturnTy
 }
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!html) return ''
+  return html
+    // Drop script/style/noscript blocks entirely (their text isn't article content)
+    .replace(/<(script|style|noscript|svg|iframe)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    // Strip remaining tags
+    .replace(/<[^>]+>/g, ' ')
+    // Decode common HTML entities
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)))
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function normalizeDate(raw: string): string {
