@@ -21,8 +21,9 @@ interface ArticleReaderProps {
 type Status = 'loading' | 'ready' | 'error'
 
 const MAX_CONTENT_CHARS = 12000
-const HEADER_LINES = 5   // top border + category + title + url + spacer
-const FOOTER_LINES = 2   // scroll indicator + bottom border
+const HEADER_LINES = 5   // category + spacer + title + url + spacer
+const FOOTER_LINES = 1   // scroll indicator
+const BORDER_LINES = 2   // round border (top + bottom)
 
 export function ArticleReader({ article, onClose }: ArticleReaderProps) {
   const { accent } = useTheme()
@@ -70,7 +71,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
     return wrapText(content, innerWidth)
   }, [content, innerWidth, status])
 
-  const visibleHeight = Math.max(3, windowHeight - HEADER_LINES - FOOTER_LINES)
+  const visibleHeight = Math.max(3, windowHeight - HEADER_LINES - FOOTER_LINES - BORDER_LINES)
   const {
     visibleLines,
     isAtBottom,
@@ -149,7 +150,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
           <Text color="gray" wrap="truncate-end">{article.url}</Text>
         </Box>
 
-        <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        <Box flexDirection="column" height={visibleHeight} overflow="hidden">
           {status === 'loading' && (
             <Text color="gray">Cargando artículo…</Text>
           )}
@@ -157,11 +158,7 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
             <Text color="red">Error: {error}</Text>
           )}
           {status === 'ready' && (
-            <Box flexDirection="column">
-              {visibleLines.map((line, i) => (
-                <Text key={i} color="white">{line || ' '}</Text>
-              ))}
-            </Box>
+            <Text color="white" wrap="wrap">{visibleLines.join('\n')}</Text>
           )}
         </Box>
 
