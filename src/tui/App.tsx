@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { streamChat } from '../core/ollama.js'
-import { getCommentaryClient } from '../core/llm-client.js'
+import { getCommentaryClient, getDefaultClient } from '../core/llm-client.js'
 import { buildSportsCommentaryPrompt } from '../tools/espn.js'
 import { buildPreferencesContext } from '../memory/preferences.js'
 import { useLoading } from './hooks/useLoading.js'
@@ -142,6 +142,38 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const [digestArticles, setDigestArticles] = useState<Array<{ position: number; title: string; url: string; source: string; category: string }>>([])
   const [readingArticle, setReadingArticle] = useState<DigestArticle | null>(null)
   const messageCountRef = useRef(0)
+  const welcomeDoneRef = useRef(false)
+
+  // Welcome greeting: when Chat mounts fresh (not resumed), greet the user warmly
+  useEffect(() => {
+    if (resumeSessionId || welcomeDoneRef.current) return
+    welcomeDoneRef.current = true
+
+    const config = loadConfig()
+    const name = config.userName
+
+    const welcomePrompt = name
+      ? `Saluda cálidamente a ${name} y pregúntale cómo puedes ayudarle hoy. Responde en español. Máximo 2 líneas. No uses emojis.`
+      : `Saluda cálidamente al usuario y ofrécete a ayudar. Responde en español. Máximo 2 líneas. No uses emojis.`
+
+    let buffer = ''
+    startLoading()
+
+    streamChat(
+      '',
+      (token) => {
+        buffer += token
+        updateMessages([{ role: 'assistant', content: buffer }])
+      },
+      [{ role: 'user', content: welcomePrompt }],
+      'Eres Null, un asistente personal de IA amable y servicial. Respondes en español.',
+      { temperature: 0.7 },
+    ).then(() => {
+      stopLoading()
+    }).catch(() => {
+      stopLoading()
+    })
+  }, [resumeSessionId])
 
   // Load existing messages when resuming a session
   useEffect(() => {
@@ -666,7 +698,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       <Footer
         isLoading={isLoading}
         loadingPos={loadingPos}
-        isAtBottom={isAtBottom}
+        isAtEnd={isAtBottom}
         hasMoreLines={hasMoreLines}
         scrollOffset={scrollOffset}
         digestCount={digestArticles.length}
