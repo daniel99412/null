@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { streamChat } from '../core/ollama.js'
 import { getCommentaryClient, getDefaultClient } from '../core/llm-client.js'
@@ -15,6 +15,9 @@ import { Footer } from './components/Footer.js'
 import { printGoodbye } from './components/Goodbye.js'
 import { CommandPalette } from './components/CommandPalette.js'
 import type { CommandItem } from './components/CommandPalette.js'
+import { SlashMenu } from './components/SlashMenu.js'
+import type { SlashCommandEntry } from './components/SlashMenu.js'
+import { getRegistry } from '../mcp/registry.js'
 import { SessionList } from './components/SessionList.js'
 import { ColorPicker } from './components/ColorPicker.js'
 import { FirstRunSetup } from './components/FirstRunSetup.js'
@@ -45,6 +48,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'theme', label: 'Theme', description: 'Change the accent color of the UI', shortcut: '' },
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
   { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search, news, ESPN)', shortcut: '' },
+  { id: 'tools', label: 'Tools', description: 'List all available tools', shortcut: '/' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
@@ -120,6 +124,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const contentHeight = terminalHeight - headerHeight - inputHeight - footerHeight - 2
 
   const [input, setInput] = useState('')
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const messagesRef = useRef<ChatMessage[]>([])
 
@@ -201,6 +206,35 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
   const { isLoading, loadingPos, startLoading, stopLoading } = useLoading()
   const { isVisible: cursorVisible } = useCursor(isLoading)
+
+  // ── Slash menu ──────────────────────────────────────────────────────────
+  const slashActive = input.startsWith('/') && !isLoading
+
+  const slashCommands = useMemo(() => getRegistry().getSlashCommands(), [])
+
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashActive) return []
+    const filter = input.slice(1).toLowerCase()
+    if (!filter) return slashCommands
+    return slashCommands.filter((c) => c.alias.toLowerCase().startsWith(filter))
+  }, [slashCommands, slashActive, input])
+
+  // Reset selection when filter changes
+  useEffect(() => {
+    setSlashSelectedIndex(0)
+  }, [filteredSlashCommands.length])
+
+  const executeSlashCommand = useCallback((alias: string) => {
+    if (alias === 'tools') {
+      const registry = getRegistry()
+      const toolList = registry.listTools()
+      const formatted = toolList.map(t => `  ${t.name.padEnd(28)} ${t.description.split('.')[0]}`).join('\n')
+      const msg = `Available tools:\n${formatted}`
+      saveMessage(session.id, 'user', '/tools')
+      updateMessages((m) => [...m, { role: 'user', content: '/tools' }, { role: 'assistant', content: msg } as ChatMessage])
+      messageCountRef.current++
+    }
+  }, [session.id, updateMessages])
 
   const buffer = useRef('')
 
@@ -333,6 +367,15 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         setOverlay('none')
         break
       }
+      case 'tools': {
+        const registry = getRegistry()
+        const toolList = registry.listTools()
+        const formatted = toolList.map(t => `  ${t.name.padEnd(28)} ${t.description.split('.')[0]}`).join('\n')
+        const msg = `Available tools:\n${formatted}`
+        updateMessages((m) => [...m, { role: 'assistant', content: msg } as ChatMessage])
+        setOverlay('none')
+        break
+      }
       case 'exit':
         handleExit()
         break
@@ -373,10 +416,48 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
     if (isLoading) return
 
+    // ── Slash menu handling ─────────────────────────────────────────────────
+    if (slashActive) {
+      if (key.escape) {
+        setInput('')
+        return
+      }
+
+      if (key.upArrow) {
+        setSlashSelectedIndex((i) => Math.max(0, i - 1))
+        return
+      }
+
+      if (key.downArrow) {
+        setSlashSelectedIndex((i) => Math.min(filteredSlashCommands.length - 1, i + 1))
+        return
+      }
+
+      if (key.return && filteredSlashCommands.length > 0) {
+        const selected = filteredSlashCommands[slashSelectedIndex]
+        if (selected.argHint === null) {
+          executeSlashCommand(selected.alias)
+          return
+        }
+        setInput('/' + selected.alias + ' ')
+        return
+      }
+    }
+
     if (key.return) {
       if (!input.trim()) return
       if (input.trim().toLowerCase() === 'exit' || input.trim().toLowerCase() === '/exit') {
         handleExit()
+        return
+      }
+      if (input.trim().toLowerCase() === '/tools') {
+        const registry = getRegistry()
+        const toolList = registry.listTools()
+        const formatted = toolList.map(t => `  ${t.name.padEnd(28)} ${t.description.split('.')[0]}`).join('\n')
+        const msg = `Available tools:\n${formatted}`
+        saveMessage(session.id, 'user', '/tools')
+        updateMessages((m) => [...m, { role: 'user', content: '/tools' }, { role: 'assistant', content: msg } as ChatMessage])
+        messageCountRef.current++
         return
       }
 
@@ -695,6 +776,12 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         visibleCount={contentHeight}
         terminalWidth={terminalWidth}
         dimmed={isModalOpen}
+      />
+
+      <SlashMenu
+        commands={filteredSlashCommands}
+        selectedIndex={slashSelectedIndex}
+        visible={slashActive && filteredSlashCommands.length > 0}
       />
 
       <Input
