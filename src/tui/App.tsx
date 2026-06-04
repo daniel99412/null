@@ -517,8 +517,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
         const isExplicitSearch = /^\/search\s+/i.test(txt)
 
-        const agentResult = await processQuery(txt, isExplicitSearch, (statusMsg) => {
-          setStatusText(statusMsg)
+        const agentResult = await processQuery(txt, isExplicitSearch, () => {
+          setStatusText('Thinking...')
         })
 
         setStatusText('')
@@ -546,11 +546,11 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           const reactResult = await processQueryWithReAct(
             agentResult.userContent,
             history,
-            (statusMsg) => {
-              setStatusText(statusMsg)
+            () => {
+              setStatusText('Thinking...')
             },
-            (toolName) => {
-              setStatusText(`Using: ${toolName}`)
+            () => {
+              setStatusText('Thinking...')
             },
           )
 
