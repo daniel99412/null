@@ -9,6 +9,7 @@ interface FooterProps {
   isAtBottom: boolean
   hasMoreLines: boolean
   scrollOffset: number
+  statusText?: string
   digestCount?: number
   dimmed?: boolean
 }
@@ -19,6 +20,7 @@ export function Footer({
   isAtBottom,
   hasMoreLines,
   scrollOffset,
+  statusText = '',
   digestCount = 0,
   dimmed = false,
 }: FooterProps) {
@@ -28,7 +30,10 @@ export function Footer({
     <Box height={1} paddingX={1} justifyContent="space-between">
       <Box>
         {isLoading ? (
-          <Text color={accent} dimColor={dimmed}>{renderLoadingBar(loadingPos)}</Text>
+          <Text color={accent} dimColor={dimmed}>
+            {renderLoadingBar(loadingPos)}
+            {statusText ? <Text> {statusText}</Text> : null}
+          </Text>
         ) : (
           <Text color="gray" dimColor={dimmed}>null v0.1.0</Text>
         )}

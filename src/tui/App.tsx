@@ -125,6 +125,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
   const [input, setInput] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const [statusText, setStatusText] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const messagesRef = useRef<ChatMessage[]>([])
 
@@ -516,24 +517,11 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
         const isExplicitSearch = /^\/search\s+/i.test(txt)
 
-        // processQuery calls onStatus as soon as it knows what tool to use,
-        // allowing TUI to show the status message before async work completes.
         const agentResult = await processQuery(txt, isExplicitSearch, (statusMsg) => {
-          updateMessages((m) => {
-            const copy = [...m]
-            const last = copy[copy.length - 1]
-            if (last?.role === 'assistant') last.content = statusMsg
-            return copy
-          })
+          setStatusText(statusMsg)
         })
 
-        // Clear status before streaming the real response
-        updateMessages((m) => {
-          const copy = [...m]
-          const last = copy[copy.length - 1]
-          if (last?.role === 'assistant') last.content = ''
-          return copy
-        })
+        setStatusText('')
 
         // Direct response — no LLM needed (e.g. preference saved confirmation)
         if (agentResult.directResponse) {
@@ -559,22 +547,14 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             agentResult.userContent,
             history,
             (statusMsg) => {
-              updateMessages((m) => {
-                const copy = [...m]
-                const last = copy[copy.length - 1]
-                if (last?.role === 'assistant') last.content = statusMsg
-                return copy
-              })
+              setStatusText(statusMsg)
             },
             (toolName) => {
-              updateMessages((m) => {
-                const copy = [...m]
-                const last = copy[copy.length - 1]
-                if (last?.role === 'assistant') last.content = `Using tool: ${toolName}...`
-                return copy
-              })
+              setStatusText(`Using: ${toolName}`)
             },
           )
+
+          setStatusText('')
 
           // Display the ReAct final answer directly (no streaming)
           updateMessages((m) => {
@@ -596,6 +576,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             if (last?.role === 'assistant') last.content = agentResult.tableOutput!
             return copy
           })
+
+          setStatusText('')
 
           // Step 2: build commentary prompt
           // For news intent, skip scoreboard commentary — use news context directly
@@ -672,6 +654,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           history.push({ role: 'system', content: agentResult.searchContext })
         }
         history.push({ role: 'user', content: agentResult.userContent })
+
+        setStatusText('')
 
         // Use lower temperature when grounding response in external data (webSearch)
         // to reduce hallucinations. Free conversation keeps default (0.8).
@@ -794,6 +778,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       <Footer
         isLoading={isLoading}
         loadingPos={loadingPos}
+        statusText={statusText}
         isAtBottom={isAtBottom}
         hasMoreLines={hasMoreLines}
         scrollOffset={scrollOffset}
