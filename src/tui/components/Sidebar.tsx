@@ -106,6 +106,10 @@ export function Sidebar({
         </Box>
       </Box>
 
+      <Box height={1} paddingX={1} paddingY={1}>
+        <Text color="gray">{"─".repeat(SIDEBAR_WIDTH - 2)}</Text>
+      </Box>
+
       <Box flexGrow={1} />
 
       {/* Working directory */}
