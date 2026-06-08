@@ -205,7 +205,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     }
   }, [resumeSessionId])
 
-  const { isLoading, loadingPos, startLoading, stopLoading } = useLoading()
+  const { isLoading, loadingPos, loadingDir, startLoading, stopLoading } = useLoading()
   const { isVisible: cursorVisible } = useCursor(isLoading)
 
   // ── Slash menu ──────────────────────────────────────────────────────────
@@ -778,6 +778,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       <Footer
         isLoading={isLoading}
         loadingPos={loadingPos}
+        loadingDir={loadingDir}
         statusText={statusText}
         isAtBottom={isAtBottom}
         hasMoreLines={hasMoreLines}

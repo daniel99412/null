@@ -3,8 +3,8 @@ import { Box, Text } from 'ink'
 import figlet from 'figlet'
 import { useTheme } from '../context/ThemeContext.js'
 
-const LOGO = figlet.textSync('null', {
-  font: 'ANSI Shadow',
+const LOGO = figlet.textSync('NULL', {
+  font: 'Small Slant',
   horizontalLayout: 'default',
   verticalLayout: 'default',
   width: 80,
@@ -28,9 +28,9 @@ export function Splash({ onDone }: SplashProps) {
       const taglineTimer = setTimeout(() => setShowTagline(true), 200)
       return () => clearTimeout(taglineTimer)
     }
-    const speed = Math.max(2, 8 - Math.floor(charIndex / 30))
+    const speed = Math.max(10, 30 - Math.floor(charIndex / 3))
     const timer = setTimeout(() => {
-      setCharIndex((i) => Math.min(i + 3, TOTAL_CHARS))
+      setCharIndex((i) => Math.min(i + 2, TOTAL_CHARS))
     }, speed)
     return () => clearTimeout(timer)
   }, [charIndex])

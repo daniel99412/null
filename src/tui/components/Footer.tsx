@@ -6,6 +6,7 @@ import { useTheme } from '../context/ThemeContext.js'
 interface FooterProps {
   isLoading: boolean
   loadingPos: number
+  loadingDir: number
   isAtBottom: boolean
   hasMoreLines: boolean
   scrollOffset: number
@@ -17,6 +18,7 @@ interface FooterProps {
 export function Footer({
   isLoading,
   loadingPos,
+  loadingDir,
   isAtBottom,
   hasMoreLines,
   scrollOffset,
@@ -31,7 +33,7 @@ export function Footer({
       <Box>
         {isLoading ? (
           <Text color={accent} dimColor={dimmed}>
-            {renderLoadingBar(loadingPos)}
+            {renderLoadingBar(loadingPos, loadingDir)}
             {statusText ? <Text> {statusText}</Text> : null}
           </Text>
         ) : (

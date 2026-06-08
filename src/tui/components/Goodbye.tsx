@@ -3,8 +3,8 @@ import chalk from 'chalk'
 import type { AccentColor } from '../../config/index.js'
 import { loadConfig } from '../../config/index.js'
 
-const LOGO = figlet.textSync('null', {
-  font: 'ANSI Shadow',
+const LOGO = figlet.textSync('NULL', {
+  font: 'Small Slant',
   horizontalLayout: 'default',
   verticalLayout: 'default',
   width: 80,
