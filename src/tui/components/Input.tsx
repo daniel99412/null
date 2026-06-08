@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { useTheme } from "../context/ThemeContext.js";
+import type { AccentColor } from "../../config/index.js";
 
 interface InputProps {
   value: string;
@@ -18,6 +19,69 @@ function calcHeight(text: string, maxCols: number): number {
   return Math.max(1, Math.ceil(text.length / usable));
 }
 
+function isFileReferenceChar(value: string, index: number): boolean {
+  const before = value.slice(0, index + 1)
+  const atIndex = before.lastIndexOf('@')
+  if (atIndex < 0) return false
+  const between = value.slice(atIndex, index + 1)
+  if (/\s/.test(between)) return false
+  const afterAt = value[atIndex + 1]
+  if (afterAt === undefined || /\s/.test(afterAt)) return false
+
+  const current = value[index]
+  if (index > atIndex && /[),;:!?]/.test(current)) return false
+
+  return true
+}
+
+function renderInputValue(
+  value: string,
+  cursorPos: number,
+  cursorVisible: boolean,
+  isLoading: boolean,
+  accent: AccentColor,
+  effectiveDim: boolean,
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  let buffer = ''
+  let bufferAccent = false
+
+  const flush = (key: string) => {
+    if (!buffer) return
+    nodes.push(
+      <Text key={key} color={bufferAccent ? accent : 'white'} dimColor={effectiveDim}>
+        {buffer}
+      </Text>,
+    )
+    buffer = ''
+  }
+
+  for (let i = 0; i <= value.length; i++) {
+    if (i === cursorPos && cursorVisible && !isLoading) {
+      flush(`text-${i}`)
+      const char = value[i] || ' '
+      nodes.push(
+        <Text key={`cursor-${i}`} backgroundColor={accent} color="white" dimColor={effectiveDim}>
+          {char}
+        </Text>,
+      )
+      if (value[i]) continue
+    }
+
+    if (i >= value.length) break
+
+    const accentChar = isFileReferenceChar(value, i)
+    if (buffer && accentChar !== bufferAccent) {
+      flush(`text-${i}`)
+    }
+    bufferAccent = accentChar
+    buffer += value[i]
+  }
+
+  flush('text-end')
+  return nodes
+}
+
 export function Input({
   value,
   cursorPos,
@@ -32,10 +96,6 @@ export function Input({
   const contentRows = calcHeight(value, cols);
   const boxHeight = contentRows + 2;
 
-  const before = value.slice(0, cursorPos)
-  const at = value[cursorPos] || ''
-  const after = value.slice(cursorPos + 1)
-
   return (
     <Box flexDirection="row" width={cols} paddingX={1}>
       <Box width={1} backgroundColor={effectiveDim ? 'gray' : accent} />
@@ -48,18 +108,8 @@ export function Input({
         height={boxHeight}
         flexGrow={1}
       >
-        <Text color="white" dimColor={effectiveDim}>
-          {before}
-          {cursorVisible && !isLoading ? (
-            at ? (
-              <Text backgroundColor={accent} color="white">{at}</Text>
-            ) : (
-              <Text backgroundColor={accent}>{' '}</Text>
-            )
-          ) : (
-            at
-          )}
-          {after}
+        <Text>
+          {renderInputValue(value, cursorPos, cursorVisible, isLoading, accent, effectiveDim)}
         </Text>
       </Box>
     </Box>

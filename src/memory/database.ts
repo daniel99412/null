@@ -237,6 +237,33 @@ export function getDb(): Database.Database {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- ── Document index tables ─────────────────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS doc_index (
+      id TEXT PRIMARY KEY,
+      path TEXT NOT NULL UNIQUE,
+      filename TEXT NOT NULL,
+      extension TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      mtime REAL NOT NULL,
+      checksum TEXT NOT NULL,
+      indexed_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+
+    CREATE TABLE IF NOT EXISTS doc_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      doc_id TEXT NOT NULL REFERENCES doc_index(id) ON DELETE CASCADE,
+      chunk_index INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      token_count INTEGER NOT NULL,
+      embedding BLOB,
+      created_at INTEGER NOT NULL,
+      UNIQUE(doc_id, chunk_index)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_doc_chunks_doc_id ON doc_chunks(doc_id);
   `)
 
   // ── Schema migrations ──────────────────────────────────────────────────────

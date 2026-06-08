@@ -153,6 +153,15 @@ let _teamNewsSignal: Signal | null = null
 function getTeamNewsSignal(): Signal {
   if (_teamNewsSignal) return _teamNewsSignal
   const aliases = getSportsAliases()
+  if (aliases.length === 0) {
+    _teamNewsSignal = {
+      pattern: /$a/,
+      intent: 'webSearch',
+      weight: 0,
+      description: 'empty sports aliases',
+    }
+    return _teamNewsSignal
+  }
   const escaped = aliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
   _teamNewsSignal = {
     pattern: new RegExp(`(?:noticias?|news).*\\b(${escaped})\\b|\\b(${escaped})\\b.*(?:noticias?|news)`, 'i'),
@@ -182,11 +191,18 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
     }
   }
 
-  // Dynamic team-news signal (built from DB aliases, lazy)
-  const teamNewsSignal = getTeamNewsSignal()
-  if (teamNewsSignal.pattern.test(query)) {
-    scores[teamNewsSignal.intent] += teamNewsSignal.weight
-    debugLog(`[router] signal match: "${teamNewsSignal.description}" → ${teamNewsSignal.intent} +${teamNewsSignal.weight}`)
+  // Dynamic team-news signal (built from DB aliases, lazy).
+  // Only load aliases for news-like queries; most routing should not touch SQLite.
+  if (/\b(noticias?|news)\b/i.test(query)) {
+    try {
+      const teamNewsSignal = getTeamNewsSignal()
+      if (teamNewsSignal.pattern.test(query)) {
+        scores[teamNewsSignal.intent] += teamNewsSignal.weight
+        debugLog(`[router] signal match: "${teamNewsSignal.description}" → ${teamNewsSignal.intent} +${teamNewsSignal.weight}`)
+      }
+    } catch (err) {
+      debugLog(`[router] skipped dynamic team-news aliases: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   return scores

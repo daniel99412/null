@@ -6,6 +6,9 @@ import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/
 import { buildSportsContext } from '../tools/espn.js'
 import { getNewsTopics, upsertNewsTopic, deleteNewsTopic } from '../memory/database.js'
 import { upsertMemory, deleteMemory } from '../memory/memory-store.js'
+import { searchDocsHybrid, buildDocContext } from '../docs/retriever.js'
+import { indexDir } from '../docs/indexer.js'
+import { buildDocumentContextMessage, resolveDocumentParts } from './document-context.js'
 
 export interface ToolDefinition {
   name: string
@@ -212,6 +215,67 @@ export const toolDefinitions = [
         default:
           return `Acción desconocida: ${subAction}. Usa: list, add, remove.`
       }
+    },
+  },
+
+  {
+    name: 'search_docs',
+    description: 'Search indexed project documentation for relevant information. Use when the user asks about documentation, code, configurations, or any project files.',
+    showInSlashMenu: false,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query — what you want to find in the project docs',
+        },
+      },
+      required: ['query'],
+    },
+    handler: async (args) => {
+      const query = args.query as string
+      if (!query) return 'No query provided.'
+      const results = await searchDocsHybrid(query)
+      if (results.length === 0) return 'No matching documentation found.'
+      return buildDocContext(results)
+    },
+  },
+
+  {
+    name: 'read_doc',
+    description: 'Read a specific file from the project. Use when the user references a file with @filename or asks about a specific file.',
+    showInSlashMenu: false,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        filepath: {
+          type: 'string',
+          description: 'Path to the file, relative to project root',
+        },
+      },
+      required: ['filepath'],
+    },
+    handler: async (args) => {
+      const filepath = args.filepath as string
+      if (!filepath) return 'No file path provided.'
+      const parts = await resolveDocumentParts(`@${filepath}`)
+      if (parts.length === 0) return 'No file path provided.'
+      return buildDocumentContextMessage(parts)
+    },
+  },
+
+  {
+    name: 'index_docs',
+    description: 'Index project documentation for search. Scans the project directory for documents and builds a searchable index. Run this once after opening a new project.',
+    showInSlashMenu: false,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+    handler: async () => {
+      const result = await indexDir()
+      return `Indexed ${result.files} files (${result.chunks} chunks).`
     },
   },
 ] as const satisfies readonly ToolDefinition[]

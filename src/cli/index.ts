@@ -8,6 +8,12 @@ import { loadConfig, setAccentColor, setModel } from '../config/index.js'
 import type { AccentColor } from '../config/index.js'
 import { cleanCaches } from '../memory/database.js'
 import { getDefaultClient } from '../core/llm-client.js'
+import {
+  buildDocumentContextMessage,
+  buildDocumentResponseInstruction,
+  resolveDocumentParts,
+  stripDocumentRefs,
+} from '../core/document-context.js'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -137,6 +143,36 @@ export function runCLI(): void {
       process.stdout.write('\x1B[36mnull\x1B[0m > ')
 
       try {
+        const documentParts = await resolveDocumentParts(prompt)
+        if (documentParts.length > 0) {
+          const userQuestion = stripDocumentRefs(prompt) || 'Resume el contenido de los archivos adjuntos.'
+          const docInstruction = buildDocumentResponseInstruction(userQuestion)
+          const client = getDefaultClient()
+          let buffer = ''
+          await client.streamChat(
+            [
+              {
+                role: 'system',
+                content: [
+                  'You are Null, a helpful assistant.',
+                  buildDocumentContextMessage(documentParts),
+                ].join('\n\n'),
+              },
+              {
+                role: 'user',
+                content: `${userQuestion}\n\n${docInstruction}`,
+              },
+            ],
+            (token: string) => {
+              buffer += token
+              process.stdout.write(token)
+            },
+            { temperature: 0.3 },
+          )
+          process.stdout.write('\n')
+          return
+        }
+
         const result = await processQuery(prompt, false, (msg) => {
           process.stdout.write(`\n\x1B[90m${msg}\x1B[0m\n`)
         })

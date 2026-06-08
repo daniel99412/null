@@ -19,6 +19,7 @@ import { getNewsTopics } from '../memory/database.js'
 import { getRegistry } from '../mcp/registry.js'
 import type { OllamaToolFormat } from '../mcp/types.js'
 import { loadConfig, DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../config/index.js'
+import { isFastPathConversation } from './fast-path.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -310,6 +311,15 @@ export async function processQuery(
     ? query.replace(/^\/search\s+/i, '').trim()
     : query
 
+  if (!isExplicitSearch && isFastPathConversation(query)) {
+    return {
+      userContent: query,
+      searchContext: null,
+      statusMessage: null,
+      useReAct: false,
+    }
+  }
+
   if (isExplicitSearch) {
     onStatus?.('Searching the web...')
     const result = await performSearch(searchQuery, query)
@@ -576,7 +586,11 @@ You have access to tools that you can call to help answer the user.
 When you need information, call the appropriate tool.
 When you have enough information to answer the user, respond directly.
 Answer in the same language the user writes in.
-NEVER say you cannot access the internet — use the available tools to get current information.`
+NEVER say you cannot access the internet — use the available tools to get current information.
+For questions about project documentation or code, use search_docs to find relevant information.
+When the user asks about a specific file by name (like "dummy.pdf", "debug.log", "index.ts"), use read_doc to read it.
+The file is on the user's local machine — you can read it with read_doc.
+Use index_docs if the doc index is empty.`
 
 export interface ReActResult {
   /** Final answer text from LLM */
@@ -656,7 +670,55 @@ async function reactCall(
     }
   }
 
+  // Fallback: try to parse tool calls from plain text JSON
+  const parsed = tryParseToolCallJson(content)
+  if (parsed && parsed.length > 0) {
+    debugLog(`[agent] parsed tool call from plain text: ${parsed[0].name}`)
+    return { content, toolCalls: parsed }
+  }
+
   return { content }
+}
+
+/**
+ * Fallback parser for LLM responses that embed raw JSON tool calls
+ * (e.g. {"name":"read_doc","arguments":{...}}) in conversational text.
+ * Scans for JSON object boundaries by tracking brace depth.
+ */
+function tryParseToolCallJson(text: string): Array<{ name: string; arguments: Record<string, unknown> }> | null {
+  const results: Array<{ name: string; arguments: Record<string, unknown> }> = []
+
+  // Scan through text, try to extract JSON objects
+  let i = 0
+  while (i < text.length) {
+    const braceStart = text.indexOf('{', i)
+    if (braceStart === -1) break
+
+    // Track brace depth to find the matching closing brace
+    let depth = 0
+    let j = braceStart
+    for (; j < text.length; j++) {
+      if (text[j] === '{') depth++
+      else if (text[j] === '}') {
+        depth--
+        if (depth === 0) break
+      }
+    }
+    if (depth !== 0) { i = braceStart + 1; continue }
+
+    const candidate = text.slice(braceStart, j + 1)
+    try {
+      const obj = JSON.parse(candidate)
+      if (obj && typeof obj === 'object' && obj.name && obj.arguments) {
+        results.push({ name: obj.name, arguments: obj.arguments as Record<string, unknown> })
+      }
+    } catch {
+      // Not valid JSON, try next position
+    }
+    i = braceStart + 1
+  }
+
+  return results.length > 0 ? results : null
 }
 
 /**
@@ -782,6 +844,9 @@ export async function processQueryWithReAct(
         get_location: 'Getting location...',
         news_digest: 'Fetching news...',
         news_manage_topics: 'Managing topics...',
+        search_docs: 'Searching project docs...',
+        read_doc: 'Reading file...',
+        index_docs: 'Indexing project docs...',
       }
       onStatus?.(statusLabels[toolName] ?? `Running ${toolName}...`)
 

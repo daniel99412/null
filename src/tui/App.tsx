@@ -8,6 +8,10 @@ import { useLoading } from './hooks/useLoading.js'
 import { useCursor } from './hooks/useCursor.js'
 import { Splash } from './components/Splash.js'
 
+import { FileMenu } from './components/FileMenu.js'
+import type { FileEntry } from './components/FileMenu.js'
+import { searchFiles } from './utils/file-search.js'
+
 import { MessageList, countRenderedLines } from './components/MessageList.js'
 import type { ChatMessage } from './components/MessageList.js'
 import { Input } from './components/Input.js'
@@ -42,6 +46,13 @@ import { runCleanup } from '../memory/cleanup.js'
 import { loadConfig, isFirstRun } from '../config/index.js'
 import { processQuery, processQueryWithReAct } from '../core/agent.js'
 import { cleanCaches } from '../memory/database.js'
+import {
+  buildFileScopedHistory,
+  buildDocumentContextMessage,
+  buildDocumentResponseInstruction,
+  resolveDocumentParts,
+  stripDocumentRefs,
+} from '../core/document-context.js'
 
 const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
@@ -126,6 +137,21 @@ function deleteWordBefore(text: string, pos: number): { text: string; pos: numbe
   }
 }
 
+function getActiveFileReference(input: string, cursorPos: number): { atIndex: number; pattern: string } | null {
+  const beforeCursor = input.slice(0, cursorPos)
+  const atIndex = beforeCursor.lastIndexOf('@')
+  if (atIndex < 0) return null
+
+  const tokenBeforeCursor = input.slice(atIndex, cursorPos)
+  if (/\s/.test(tokenBeforeCursor)) return null
+
+  const afterAt = input.slice(atIndex + 1)
+  const pattern = afterAt.split(/\s/)[0]
+  if (!pattern.trim()) return null
+
+  return { atIndex, pattern }
+}
+
 function Chat({ resumeSessionId, onExit }: ChatProps) {
   const { exit } = useApp()
 
@@ -164,6 +190,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
   const [digestArticles, setDigestArticles] = useState<Array<{ position: number; title: string; url: string; source: string; category: string }>>([])
   const [readingArticle, setReadingArticle] = useState<DigestArticle | null>(null)
+  const [fileMatches, setFileMatches] = useState<FileEntry[]>([])
+  const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
   const messageCountRef = useRef(0)
   const welcomeDoneRef = useRef(false)
 
@@ -253,6 +281,22 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   }, [session.id, updateMessages])
 
   const buffer = useRef('')
+
+  // ── File reference (@file) detection ───────────────────────────────────
+  useEffect(() => {
+    const activeRef = getActiveFileReference(input, cursorPos)
+    if (!activeRef || isLoading) {
+      setFileMatches([])
+      return
+    }
+
+    const matches = searchFiles(activeRef.pattern)
+    const hasExactMatch = matches.some((file) => file.relativePath === activeRef.pattern)
+    setFileMatches(hasExactMatch ? [] : matches)
+    setFileSelectedIndex(0)
+  }, [input, cursorPos, isLoading])
+
+  const fileMenuActive = fileMatches.length > 0 && !isLoading && overlay === 'none'
 
   const totalLines = countRenderedLines(messages, terminalWidth)
   const hasMoreLines = totalLines > contentHeight
@@ -410,6 +454,40 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
+    // ── File menu (@file) handling ──────────────────────────────────────
+    if (fileMenuActive) {
+      if (key.upArrow) {
+        setFileSelectedIndex((i) => Math.max(0, i - 1))
+        return
+      }
+      if (key.downArrow) {
+        setFileSelectedIndex((i) => Math.min(fileMatches.length - 1, i + 1))
+        return
+      }
+      if (key.escape) {
+        setFileMatches([])
+        return
+      }
+      if (key.return) {
+        const selected = fileMatches[fileSelectedIndex]
+        if (selected) {
+          const activeRef = getActiveFileReference(input, cursorPos)
+          if (activeRef) {
+            const before = input.slice(0, activeRef.atIndex)
+            const after = input.slice(activeRef.atIndex + 1 + activeRef.pattern.length)
+            const spacer = after.length === 0 || /^\s/.test(after) ? '' : ' '
+            const inserted = `@${selected.relativePath}`
+            const replaced = before + inserted + spacer + after
+            setInput(replaced)
+            setCursorPos((before + inserted + spacer).length)
+          }
+        }
+        setFileMatches([])
+        return
+      }
+      // Any other key (except specials handled above) — let input update below
+    }
+
     if (key.ctrl && char === 'c') {
       handleExit()
       return
@@ -526,6 +604,11 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       buffer.current = ''
 
       const sendToLLM = async (): Promise<void> => {
+        const documentParts = await resolveDocumentParts(txt)
+        const resolvedTxt = documentParts.length > 0
+          ? stripDocumentRefs(txt) || 'Resume el contenido de los archivos adjuntos.'
+          : txt
+
         // Build conversation history from all previous turns.
         // Use currentMessages (captured before state update) to avoid React batching issues.
         if (process.env['NULL_DEBUG']) {
@@ -551,9 +634,37 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           history.forEach((m, i) => console.error(`  [${i}] ${m.role}: ${String(m.content).slice(0, 60)}`))
         }
 
-        const isExplicitSearch = /^\/search\s+/i.test(txt)
+        if (documentParts.length > 0) {
+          const docContext = buildDocumentContextMessage(documentParts)
+          const docInstruction = buildDocumentResponseInstruction(resolvedTxt)
+          const fileScopedHistory = buildFileScopedHistory(history)
+          const docMessages = [
+            ...fileScopedHistory,
+            { role: 'system', content: docContext },
+            {
+              role: 'user',
+              content: `${resolvedTxt}\n\n${docInstruction}`,
+            },
+          ]
 
-        const agentResult = await processQuery(txt, isExplicitSearch, () => {
+          setStatusText('')
+          await streamChat('', (tok) => {
+            buffer.current += tok
+            updateMessages((m) => {
+              const copy = [...m]
+              const last = copy[copy.length - 1]
+              if (last?.role === 'assistant') {
+                last.content = buffer.current
+              }
+              return copy
+            })
+          }, docMessages, undefined, { temperature: 0.3 })
+          return
+        }
+
+        const isExplicitSearch = /^\/search\s+/i.test(resolvedTxt)
+
+        const agentResult = await processQuery(resolvedTxt, isExplicitSearch, () => {
           setStatusText('Thinking...')
         })
 
@@ -627,14 +738,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
               ...(newsContext ? [{ role: 'system', content: newsContext }] : []),
               {
                 role: 'user',
-                content: `${txt}\n\nResume las noticias más relevantes del equipo en 2-4 líneas. Usa SOLO los titulares de arriba. No inventes nada. Responde en español.`,
-              },
-            ]
-          } else if (agentResult.scoreboard) {
-            const prefsCtx = buildPreferencesContext() ?? undefined
-            const { systemPrompt, userInstruction } = buildSportsCommentaryPrompt(
-              agentResult.scoreboard,
-              txt,
+                content: `${resolvedTxt}\n\nResume las noticias más relevantes del equipo en 2-4 líneas. Usa SOLO los titulares de arriba. No inventes nada. Responde en español.`,
+              }]
+            } else if (agentResult.scoreboard) {
+              const prefsCtx = buildPreferencesContext() ?? undefined
+              const { systemPrompt, userInstruction } = buildSportsCommentaryPrompt(
+                agentResult.scoreboard,
+                resolvedTxt,
               tz,
               prefsCtx,
             )
@@ -655,7 +765,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
               ...(sportSystemContent ? [{ role: 'system', content: sportSystemContent }] : []),
               {
                 role: 'user',
-                content: `${txt}\n\nEscribe 2-4 líneas de comentario deportivo basado SOLO en los datos anteriores. No inventes nada.`,
+                content: `${resolvedTxt}\n\nEscribe 2-4 líneas de comentario deportivo basado SOLO en los datos anteriores. No inventes nada.`,
               },
             ]
           }
@@ -800,6 +910,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           commands={filteredSlashCommands}
           selectedIndex={slashSelectedIndex}
           visible={slashActive && filteredSlashCommands.length > 0}
+          width={mainContentWidth}
+        />
+
+        <FileMenu
+          files={fileMatches}
+          selectedIndex={fileSelectedIndex}
+          visible={fileMenuActive}
           width={mainContentWidth}
         />
 

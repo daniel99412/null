@@ -244,6 +244,47 @@ function getBarColor(role: 'user' | 'assistant' | 'recall', accent: AccentColor)
   return 'gray'
 }
 
+function renderMessageText(line: RenderLine, accent: AccentColor, dimmed: boolean): React.ReactNode {
+  if (line.role !== 'user') {
+    return (
+      <Text color={line.role === 'recall' ? 'yellowBright' : 'white'} dimColor={dimmed} wrap="wrap">
+        {line.text}
+      </Text>
+    )
+  }
+
+  const parts: React.ReactNode[] = []
+  const pattern = /@(?:"[^"]+"|'[^']+'|[^\s]+)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(line.text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(
+        <Text key={`plain-${lastIndex}`} color="white" dimColor={dimmed}>
+          {line.text.slice(lastIndex, match.index)}
+        </Text>,
+      )
+    }
+    parts.push(
+      <Text key={`file-${match.index}`} color={accent} dimColor={dimmed}>
+        {match[0]}
+      </Text>,
+    )
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < line.text.length) {
+    parts.push(
+      <Text key={`plain-${lastIndex}`} color="white" dimColor={dimmed}>
+        {line.text.slice(lastIndex)}
+      </Text>,
+    )
+  }
+
+  return <Text wrap="wrap">{parts.length > 0 ? parts : line.text}</Text>
+}
+
 export function MessageList({
   messages,
   visibleStart,
@@ -281,13 +322,7 @@ export function MessageList({
         return (
           <Box key={start + i} flexDirection="row">
             <Text color={barColor} dimColor={dimmed}>{'┃ '}</Text>
-            <Text
-              color={line.role === 'recall' ? 'yellowBright' : 'white'}
-              dimColor={dimmed}
-              wrap="wrap"
-            >
-              {line.text}
-            </Text>
+            {renderMessageText(line, accent, dimmed)}
           </Box>
         )
       })}
