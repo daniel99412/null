@@ -7,7 +7,7 @@ import { buildPreferencesContext } from '../memory/preferences.js'
 import { useLoading } from './hooks/useLoading.js'
 import { useCursor } from './hooks/useCursor.js'
 import { Splash } from './components/Splash.js'
-import { Header } from './components/Header.js'
+
 import { MessageList, countRenderedLines } from './components/MessageList.js'
 import type { ChatMessage } from './components/MessageList.js'
 import { Input } from './components/Input.js'
@@ -38,11 +38,9 @@ import {
 } from '../memory/sessions.js'
 import type { Session } from '../memory/sessions.js'
 import { runCleanup } from '../memory/cleanup.js'
-import { loadConfig, DEFAULT_MODEL, isFirstRun } from '../config/index.js'
+import { loadConfig, isFirstRun } from '../config/index.js'
 import { processQuery, processQueryWithReAct } from '../core/agent.js'
 import { cleanCaches } from '../memory/database.js'
-
-const MODEL = loadConfig().model ?? DEFAULT_MODEL
 
 const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
@@ -120,10 +118,9 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const terminalWidth = process.stdout?.columns || 80
   const terminalHeight = process.stdout?.rows || 24
   const mainContentWidth = terminalWidth - SIDEBAR_WIDTH
-  const headerHeight = 1
   const inputHeight = 3
   const footerHeight = 1
-  const contentHeight = terminalHeight - headerHeight - inputHeight - footerHeight - 2
+  const contentHeight = terminalHeight - inputHeight - footerHeight - 1
 
   const [input, setInput] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
@@ -752,12 +749,6 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     <Box flexDirection="row" height={terminalHeight}>
       {/* Main content column */}
       <Box flexDirection="column" width={mainContentWidth}>
-        <Header model={MODEL} sessionId={session.id} width={mainContentWidth} dimmed={isModalOpen} />
-
-        <Box height={1} paddingX={1}>
-          <Text color="gray" dimColor={isModalOpen}>{'─'.repeat(Math.max(0, mainContentWidth - 4))}</Text>
-        </Box>
-
         <MessageList
           messages={messages}
           visibleStart={scrollOffset}
@@ -795,7 +786,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       </Box>
 
       {/* Right sidebar */}
-      <Sidebar isLoading={isLoading} terminalHeight={terminalHeight} />
+      <Sidebar isLoading={isLoading} terminalHeight={terminalHeight} sessionId={session.id} />
 
       {/* Floating modal overlay — covers everything including sidebar */}
       {isModalOpen && (

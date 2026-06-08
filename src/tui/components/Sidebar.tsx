@@ -12,9 +12,10 @@ const VOCHO_THINK_R: [string, string] = [' .(___).', '(o\\_|_/o)']
 interface SidebarProps {
   isLoading: boolean
   terminalHeight: number
+  sessionId: string
 }
 
-export function Sidebar({ isLoading, terminalHeight }: SidebarProps) {
+export function Sidebar({ isLoading, terminalHeight, sessionId }: SidebarProps) {
   const { accent } = useTheme()
   const [blink, setBlink] = useState(false)
   const [thinkPhase, setThinkPhase] = useState(false)
@@ -54,14 +55,27 @@ export function Sidebar({ isLoading, terminalHeight }: SidebarProps) {
 
   return (
     <Box width={SIDEBAR_WIDTH} flexDirection="column" height={terminalHeight}>
+      {/* HR at top */}
+      <Box height={1} paddingX={1}>
+        <Text color="gray">{'─'.repeat(SIDEBAR_WIDTH - 2)}</Text>
+      </Box>
+
+      {/* Vochito centered */}
       <Box flexGrow={1} flexDirection="column" alignItems="center" justifyContent="center">
         <Box flexDirection="column" alignItems="center">
           <Text color={accent} dimColor={!breath}>{vocho[0]}</Text>
           <Text color={accent} dimColor={!breath}>{vocho[1]}</Text>
         </Box>
       </Box>
+
+      {/* Session name */}
       <Box justifyContent="center" height={1}>
-        <Text color="gray" dimColor>v0.1.0</Text>
+        <Text color="white" dimColor>{sessionId.slice(0, 12)}</Text>
+      </Box>
+
+      {/* null · v0.1.0 */}
+      <Box justifyContent="center" height={1}>
+        <Text color="gray">· null · v0.1.0</Text>
       </Box>
     </Box>
   )
