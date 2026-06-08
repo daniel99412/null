@@ -55,7 +55,7 @@ type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confi
 
 interface ChatProps {
   resumeSessionId?: string
-  onExit: (sessionId: string, sessionDate: string, hasMessages: boolean) => void
+  onExit: (sessionId: string, sessionDate: string, hasMessages: boolean, messageCount: number) => void
 }
 
 interface ConfirmDialogProps {
@@ -253,8 +253,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
   const handleExit = useCallback(() => {
     const hasMessages = messageCountRef.current > 0
-    onExit(session.id, session.created_at, hasMessages)
-  }, [session.id, session.created_at, onExit])
+    onExit(session.id, session.created_at, hasMessages, messageCountRef.current)
+  }, [session.id, session.created_at, onExit, messageCountRef])
 
   const handleNewSession = useCallback(() => {
     const newSession = createSession()
@@ -786,7 +786,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       </Box>
 
       {/* Right sidebar */}
-      <Sidebar isLoading={isLoading} terminalHeight={terminalHeight} />
+      <Sidebar isLoading={isLoading} terminalHeight={terminalHeight} sessionName={session.title ?? session.id} />
 
       {/* Floating modal overlay — covers everything including sidebar */}
       {isModalOpen && (
@@ -870,10 +870,31 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 }
 
 export function runTUI(resumeSessionId?: string): void {
-  const exitInfoRef = { current: { sessionId: '', sessionDate: '', hasMessages: false } }
+  const exitInfoRef: {
+    current: {
+      sessionId: string
+      sessionDate: string
+      hasMessages: boolean
+      messageCount: number
+      duration: string
+      model: string
+      cwd: string
+    }
+  } = {
+    current: {
+      sessionId: '',
+      sessionDate: '',
+      hasMessages: false,
+      messageCount: 0,
+      duration: '',
+      model: '',
+      cwd: process.cwd(),
+    },
+  }
 
   const InnerApp = () => {
     const { exit } = useApp()
+    const sessionStartRef = useRef(Date.now())
     const [phase, setPhase] = useState<'setup' | 'splash' | 'chat'>(
       () => (isFirstRun() ? 'setup' : 'splash'),
     )
@@ -882,8 +903,19 @@ export function runTUI(resumeSessionId?: string): void {
       sessionId: string,
       sessionDate: string,
       hasMessages: boolean,
+      messageCount: number = 0,
     ) => {
-      exitInfoRef.current = { sessionId, sessionDate, hasMessages }
+      const elapsed = Math.round((Date.now() - sessionStartRef.current) / 60000)
+      const duration = elapsed < 60 ? `${elapsed}m` : `${Math.floor(elapsed / 60)}h ${elapsed % 60}m`
+      exitInfoRef.current = {
+        sessionId,
+        sessionDate,
+        hasMessages,
+        messageCount,
+        duration,
+        model: loadConfig().model ?? '',
+        cwd: process.cwd(),
+      }
       closeDb()
       exit()
     }, [exit])
