@@ -1,8 +1,18 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { Box, Text } from 'ink'
 import { useTheme } from '../context/ThemeContext.js'
 
-const SIDEBAR_WIDTH = 22
+const SIDEBAR_WIDTH = 30
+
+function shortenPath(fullPath: string, maxLen: number): string {
+  if (fullPath.length <= maxLen) return fullPath
+  const tail = fullPath.slice(-(maxLen - 1))
+  const slashIdx = tail.indexOf('/')
+  if (slashIdx === -1) return '…' + tail.slice(-(maxLen - 1))
+  const result = '…' + tail.slice(slashIdx)
+  if (result.length > maxLen) return '…' + tail.slice(-(maxLen - 1))
+  return result
+}
 
 const VOCHO_NORMAL: [string, string] = [' .(___).', '(o\\_|_/o)']
 const VOCHO_BLINK: [string, string] = [' .(___).', '(o\\_|_-)']
@@ -12,14 +22,14 @@ const VOCHO_THINK_R: [string, string] = [' .(___).', '(o\\_|_/o)']
 interface SidebarProps {
   isLoading: boolean
   terminalHeight: number
-  sessionId: string
 }
 
-export function Sidebar({ isLoading, terminalHeight, sessionId }: SidebarProps) {
+export function Sidebar({ isLoading, terminalHeight }: SidebarProps) {
   const { accent } = useTheme()
   const [blink, setBlink] = useState(false)
   const [thinkPhase, setThinkPhase] = useState(false)
   const [breath, setBreath] = useState(false)
+  const cwd = useMemo(() => shortenPath(process.cwd(), 24), [])
 
   // Random blink every 3-6s
   useEffect(() => {
@@ -54,7 +64,7 @@ export function Sidebar({ isLoading, terminalHeight, sessionId }: SidebarProps) 
     : (blink ? VOCHO_BLINK : VOCHO_NORMAL)
 
   return (
-    <Box width={SIDEBAR_WIDTH} flexDirection="column" height={terminalHeight}>
+    <Box width={SIDEBAR_WIDTH} flexDirection="column" height={terminalHeight} backgroundColor="#16161e">
       {/* HR at top */}
       <Box height={1} paddingX={1}>
         <Text color="gray">{'─'.repeat(SIDEBAR_WIDTH - 2)}</Text>
@@ -68,9 +78,9 @@ export function Sidebar({ isLoading, terminalHeight, sessionId }: SidebarProps) 
         </Box>
       </Box>
 
-      {/* Session name */}
+      {/* Working directory */}
       <Box justifyContent="center" height={1}>
-        <Text color="white" dimColor>{sessionId.slice(0, 12)}</Text>
+        <Text color="white" dimColor>{cwd}</Text>
       </Box>
 
       {/* null · v0.1.0 */}

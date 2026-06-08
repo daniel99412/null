@@ -786,7 +786,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       </Box>
 
       {/* Right sidebar */}
-      <Sidebar isLoading={isLoading} terminalHeight={terminalHeight} sessionId={session.id} />
+      <Sidebar isLoading={isLoading} terminalHeight={terminalHeight} />
 
       {/* Floating modal overlay — covers everything including sidebar */}
       {isModalOpen && (

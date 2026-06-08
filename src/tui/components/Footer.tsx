@@ -36,9 +36,7 @@ export function Footer({
             {renderLoadingBar(loadingPos, loadingDir)}
             {statusText ? <Text> {statusText}</Text> : null}
           </Text>
-        ) : (
-          <Text color="gray" dimColor={dimmed}>null v0.1.0</Text>
-        )}
+        ) : null}
       </Box>
       <Box>
         {!isAtBottom && hasMoreLines ? (
