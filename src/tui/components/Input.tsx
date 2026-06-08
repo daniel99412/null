@@ -4,6 +4,7 @@ import { useTheme } from "../context/ThemeContext.js";
 
 interface InputProps {
   value: string;
+  cursorPos: number;
   cursorVisible: boolean;
   isLoading: boolean;
   width: number;
@@ -19,6 +20,7 @@ function calcHeight(text: string, maxCols: number): number {
 
 export function Input({
   value,
+  cursorPos,
   cursorVisible,
   isLoading,
   width: cols,
@@ -30,9 +32,13 @@ export function Input({
   const contentRows = calcHeight(value, cols);
   const boxHeight = contentRows + 2;
 
+  const before = value.slice(0, cursorPos)
+  const at = value[cursorPos] || ''
+  const after = value.slice(cursorPos + 1)
+
   return (
     <Box flexDirection="row" width={cols} paddingX={1}>
-      <Box width={1} backgroundColor={effectiveDim ? "gray" : accent} />
+      <Box width={1} backgroundColor={effectiveDim ? 'gray' : accent} />
       <Box width={1} />
       <Box
         flexDirection="row"
@@ -43,12 +49,17 @@ export function Input({
         flexGrow={1}
       >
         <Text color="white" dimColor={effectiveDim}>
-          {value}
+          {before}
           {cursorVisible && !isLoading ? (
-            <Text color={accent} inverse>
-              {" "}
-            </Text>
-          ) : null}
+            at ? (
+              <Text backgroundColor={accent} color="white">{at}</Text>
+            ) : (
+              <Text backgroundColor={accent}>{' '}</Text>
+            )
+          ) : (
+            at
+          )}
+          {after}
         </Text>
       </Box>
     </Box>

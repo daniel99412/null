@@ -15,10 +15,10 @@ const LOGO_LINES = LOGO.split("\n").filter(
 );
 
 const VOCHO_SLEEP = [
-  "                   Z ",
-  "                  Z  ",
-  "       .(___).   Z   ",
-  "      (_\\_|_/_)     ",
+  "               Z ",
+  "              Z  ",
+  "   .(___).   Z   ",
+  "  (u\\_|_/u)     ",
 ];
 
 const FAREWELLS = [
@@ -55,7 +55,7 @@ function shortenPath(fullPath: string, maxLen: number): string {
 }
 
 const LEFT_WIDTH = 22;
-const GAP = 4;
+const GAP = 1;
 
 const combinedLines: string[] = [];
 const nullLines = LOGO_LINES.length;
@@ -96,7 +96,7 @@ export function printGoodbye({
   const rows = process.stdout?.rows || 24;
 
   const totalContent = combinedLines.length + (hasMessages ? 8 : 4);
-  const topPad = Math.max(2, Math.floor((rows - totalContent) / 3));
+  const topPad = Math.max(1, Math.min(3, Math.floor((rows - totalContent) / 6)));
 
   const farewellIdx =
     sessionId.split("").reduce((a, c) => a + c.charCodeAt(0), 0) %

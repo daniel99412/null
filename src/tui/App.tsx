@@ -20,6 +20,7 @@ import type { SlashCommandEntry } from './components/SlashMenu.js'
 import { getRegistry } from '../mcp/registry.js'
 import { SessionList } from './components/SessionList.js'
 import { ColorPicker } from './components/ColorPicker.js'
+import { Keybindings } from './components/Keybindings.js'
 import { FirstRunSetup } from './components/FirstRunSetup.js'
 import { Sidebar, SIDEBAR_WIDTH } from './components/Sidebar.js'
 import { ArticleReader, type DigestArticle } from './components/ArticleReader.js'
@@ -48,10 +49,11 @@ const COMMANDS: CommandItem[] = [
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
   { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search, news, ESPN)', shortcut: '' },
   { id: 'tools', label: 'Tools', description: 'List all available tools', shortcut: '/' },
+  { id: 'keybindings', label: 'Keybindings', description: 'Show available keyboard shortcuts', shortcut: 'ctrl+h' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
-type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all' | 'article-reader'
+type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all' | 'article-reader' | 'keybindings'
 
 interface ChatProps {
   resumeSessionId?: string
@@ -112,6 +114,18 @@ function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: Co
   )
 }
 
+function deleteWordBefore(text: string, pos: number): { text: string; pos: number } {
+  if (pos === 0) return { text, pos: 0 }
+  let end = pos
+  while (end > 0 && /\s/.test(text[end - 1])) end--
+  let start = end
+  while (start > 0 && !/\s/.test(text[start - 1])) start--
+  return {
+    text: text.slice(0, start) + text.slice(pos),
+    pos: start,
+  }
+}
+
 function Chat({ resumeSessionId, onExit }: ChatProps) {
   const { exit } = useApp()
 
@@ -119,11 +133,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const terminalHeight = process.stdout?.rows || 24
   const mainContentWidth = terminalWidth - SIDEBAR_WIDTH
   const inputHeight = 3
-  const footerHeight = 1
+  const footerHeight = 3
   const contentHeight = terminalHeight - inputHeight - footerHeight - 1
 
   const [input, setInput] = useState('')
+  const [cursorPos, setCursorPos] = useState(0)
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+
   const [statusText, setStatusText] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const messagesRef = useRef<ChatMessage[]>([])
@@ -376,6 +392,9 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         setOverlay('none')
         break
       }
+      case 'keybindings':
+        setOverlay('keybindings')
+        break
       case 'exit':
         handleExit()
         break
@@ -403,6 +422,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
+    if (key.ctrl && char === 'h') {
+      if (!isLoading) {
+        setOverlay('keybindings')
+      }
+      return
+    }
+
     // Number keys 0-9 open the corresponding article from the last news digest
     if (!isLoading && /^[0-9]$/.test(char) && digestArticles.length > 0) {
       const idx = char === '0' ? 9 : parseInt(char, 10) - 1
@@ -420,6 +446,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     if (slashActive) {
       if (key.escape) {
         setInput('')
+        setCursorPos(0)
         return
       }
 
@@ -439,7 +466,9 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           executeSlashCommand(selected.alias)
           return
         }
-        setInput('/' + selected.alias + ' ')
+        const newInput = '/' + selected.alias + ' '
+        setInput(newInput)
+        setCursorPos(newInput.length)
         return
       }
     }
@@ -457,6 +486,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         const msg = `Available tools:\n${formatted}`
         saveMessage(session.id, 'user', '/tools')
         updateMessages((m) => [...m, { role: 'user', content: '/tools' }, { role: 'assistant', content: msg } as ChatMessage])
+        messageCountRef.current++
+        return
+      }
+
+      if (input.trim().toLowerCase() === '/help' || input.trim().toLowerCase() === '/keybindings') {
+        setOverlay('keybindings')
+        saveMessage(session.id, 'user', input.trim())
         messageCountRef.current++
         return
       }
@@ -484,6 +520,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       ])
 
       setInput('')
+      setCursorPos(0)
       setScrollOffset(0)
       startLoading()
       buffer.current = ''
@@ -699,6 +736,14 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
+    if (key.leftArrow) {
+      setCursorPos((p) => Math.max(0, p - 1))
+      return
+    }
+    if (key.rightArrow) {
+      setCursorPos((p) => Math.min(input.length, p + 1))
+      return
+    }
     if (key.upArrow) {
       handleUp()
       return
@@ -708,30 +753,23 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
     if (key.backspace) {
-      if (key.ctrl || key.meta) {
-        // Ctrl+Backspace / Option+Backspace: delete previous word
-        setInput((s) => {
-          const trimmed = s.replace(/\s+$/, '')
-          const lastSpace = trimmed.lastIndexOf(' ')
-          return lastSpace === -1 ? '' : s.slice(0, lastSpace + 1)
-        })
-      } else {
-        setInput((s) => s.slice(0, -1))
-      }
+      if (cursorPos === 0) return
+      setInput((s) => s.slice(0, cursorPos - 1) + s.slice(cursorPos))
+      setCursorPos((p) => p - 1)
       return
     }
 
     // Ctrl+W: delete previous word (Unix standard)
     if (key.ctrl && char === 'w') {
-      setInput((s) => {
-        const trimmed = s.replace(/\s+$/, '')
-        const lastSpace = trimmed.lastIndexOf(' ')
-        return lastSpace === -1 ? '' : s.slice(0, lastSpace + 1)
-      })
+      if (cursorPos === 0) return
+      const { text, pos } = deleteWordBefore(input, cursorPos)
+      setInput(text)
+      setCursorPos(pos)
       return
     }
     if (char) {
-      setInput((s) => s + char)
+      setInput((s) => s.slice(0, cursorPos) + char + s.slice(cursorPos))
+      setCursorPos((p) => p + 1)
     }
   })
 
@@ -743,6 +781,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     overlay === 'confirm-delete-session' ||
     overlay === 'confirm-delete-all' ||
     overlay === 'color-picker' ||
+    overlay === 'keybindings' ||
     (overlay === 'article-reader' && readingArticle !== null)
 
   return (
@@ -766,6 +805,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
         <Input
           value={input}
+          cursorPos={cursorPos}
           cursorVisible={cursorVisible}
           isLoading={isLoading}
           width={mainContentWidth}
@@ -850,6 +890,11 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             )}
             {overlay === 'color-picker' && (
               <ColorPicker
+                onClose={() => setOverlay('none')}
+              />
+            )}
+            {overlay === 'keybindings' && (
+              <Keybindings
                 onClose={() => setOverlay('none')}
               />
             )}

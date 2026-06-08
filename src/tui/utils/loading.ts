@@ -15,7 +15,7 @@ export function renderLoadingBar(pos: number, dir: number): string {
       if (idx >= 0 && idx < LOADING_BAR_WIDTH) chars[idx] = ['█', '▓', '▒', '░'][i]
     }
   }
-  return `[${chars.join('')}]`
+  return `${chars.join('')}`
 }
 
 export { LOADING_BAR_WIDTH }

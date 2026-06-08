@@ -1,18 +1,18 @@
-import React from 'react'
-import { Box, Text } from 'ink'
-import { renderLoadingBar } from '../utils/loading.js'
-import { useTheme } from '../context/ThemeContext.js'
+import React from "react";
+import { Box, Text } from "ink";
+import { renderLoadingBar } from "../utils/loading.js";
+import { useTheme } from "../context/ThemeContext.js";
 
 interface FooterProps {
-  isLoading: boolean
-  loadingPos: number
-  loadingDir: number
-  isAtBottom: boolean
-  hasMoreLines: boolean
-  scrollOffset: number
-  statusText?: string
-  digestCount?: number
-  dimmed?: boolean
+  isLoading: boolean;
+  loadingPos: number;
+  loadingDir: number;
+  isAtBottom: boolean;
+  hasMoreLines: boolean;
+  scrollOffset: number;
+  statusText?: string;
+  digestCount?: number;
+  dimmed?: boolean;
 }
 
 export function Footer({
@@ -22,14 +22,14 @@ export function Footer({
   isAtBottom,
   hasMoreLines,
   scrollOffset,
-  statusText = '',
+  statusText = "",
   digestCount = 0,
   dimmed = false,
 }: FooterProps) {
-  const { accent } = useTheme()
+  const { accent } = useTheme();
 
   return (
-    <Box height={1} paddingX={1} justifyContent="space-between">
+    <Box height={1} paddingX={1} paddingY={1} justifyContent="space-between">
       <Box>
         {isLoading ? (
           <Text color={accent} dimColor={dimmed}>
@@ -40,21 +40,43 @@ export function Footer({
       </Box>
       <Box>
         {!isAtBottom && hasMoreLines ? (
-          <Text color="yellow" dimColor={dimmed}>{scrollOffset} lines above  </Text>
+          <Text color="yellow" dimColor={dimmed}>
+            {scrollOffset} lines above{" "}
+          </Text>
         ) : null}
         {digestCount > 0 && !isLoading ? (
           <>
-            <Text color="gray" dimColor={dimmed}>{digestCount > 9 ? '0-9' : '1-9'}</Text>
-            <Text color="white" dimColor={dimmed}> leer  </Text>
+            <Text color="gray" dimColor={dimmed}>
+              {digestCount > 9 ? "0-9" : "1-9"}
+            </Text>
+            <Text color="white" dimColor={dimmed}>
+              {" "}
+              leer{" "}
+            </Text>
           </>
         ) : null}
-        <Text color="gray" dimColor={dimmed}>ctrl+p</Text>
-        <Text color="white" dimColor={dimmed}> commands  </Text>
-        <Text color="gray" dimColor={dimmed}>arrows</Text>
-        <Text color="white" dimColor={dimmed}> scroll  </Text>
-        <Text color="gray" dimColor={dimmed}>ctrl+c</Text>
-        <Text color="white" dimColor={dimmed}> quit</Text>
+        <Text color="gray" dimColor={dimmed}>
+          ctrl+p
+        </Text>
+        <Text color="white" dimColor={dimmed}>
+          {" "}
+          commands{" "}
+        </Text>
+        <Text color="gray" dimColor={dimmed}>
+          arrows
+        </Text>
+        <Text color="white" dimColor={dimmed}>
+          {" "}
+          scroll{" "}
+        </Text>
+        <Text color="gray" dimColor={dimmed}>
+          ctrl+c
+        </Text>
+        <Text color="white" dimColor={dimmed}>
+          {" "}
+          quit
+        </Text>
       </Box>
     </Box>
-  )
+  );
 }
