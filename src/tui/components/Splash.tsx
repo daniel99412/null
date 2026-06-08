@@ -1,84 +1,89 @@
-import React, { useEffect, useState } from "react";
-import { Box, Text } from "ink";
-import figlet from "figlet";
-import { useTheme } from "../context/ThemeContext.js";
+import React, { useEffect, useState, useMemo } from 'react'
+import { Box, Text } from 'ink'
+import figlet from 'figlet'
+import { useTheme } from '../context/ThemeContext.js'
 
-const LOGO = figlet.textSync("null", {
-  font: "Small Slant",
-  horizontalLayout: "default",
-  verticalLayout: "default",
+const LOGO = figlet.textSync('null', {
+  font: 'Small Slant',
+  horizontalLayout: 'default',
+  verticalLayout: 'default',
   width: 80,
-});
+})
 
-const LOGO_LINES = LOGO.split("\n");
-const TOTAL_CHARS = LOGO.length;
+const RAW_LINES = LOGO.split('\n')
+
+const VOCHO_NORMAL = [' .(___).', '(o\\_|_/o)']
+const VOCHO_BLINK = [' .(___).', '(-\\_|_-)']
+
+const GAP = 4
+
+function buildCombined(vocho: string[]): string[] {
+  const combined: string[] = []
+  for (let i = 0; i < RAW_LINES.length; i++) {
+    if (i >= 1 && i <= 2) {
+      combined.push(RAW_LINES[i] + ' '.repeat(GAP) + vocho[i - 1])
+    } else {
+      combined.push(RAW_LINES[i])
+    }
+  }
+  const maxW = Math.max(...combined.map(l => l.length))
+  return combined.map(l => l.padEnd(maxW))
+}
 
 interface SplashProps {
-  onDone: () => void;
+  onDone: () => void
 }
 
 export function Splash({ onDone }: SplashProps) {
-  const { accent } = useTheme();
-  const [charIndex, setCharIndex] = useState(0);
-  const [showTagline, setShowTagline] = useState(false);
-  const [fadeOut, setFadeOut] = useState(false);
+  const { accent } = useTheme()
+  const [breath, setBreath] = useState(false)
+  const [blink, setBlink] = useState(false)
+  const [fadeOut, setFadeOut] = useState(false)
 
   useEffect(() => {
-    if (charIndex >= TOTAL_CHARS) {
-      const taglineTimer = setTimeout(() => setShowTagline(true), 200);
-      return () => clearTimeout(taglineTimer);
-    }
-    const speed = Math.max(10, 30 - Math.floor(charIndex / 3));
+    const interval = setInterval(() => setBreath(b => !b), 2000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    if (fadeOut) return
     const timer = setTimeout(() => {
-      setCharIndex((i) => Math.min(i + 2, TOTAL_CHARS));
-    }, speed);
-    return () => clearTimeout(timer);
-  }, [charIndex]);
+      setBlink(true)
+      setTimeout(() => setBlink(false), 150)
+    }, 3000 + Math.random() * 3000)
+    return () => clearTimeout(timer)
+  }, [blink, fadeOut])
 
   useEffect(() => {
-    if (!showTagline) return;
-    const timer = setTimeout(() => setFadeOut(true), 600);
-    return () => clearTimeout(timer);
-  }, [showTagline]);
+    const fadeTimer = setTimeout(() => setFadeOut(true), 3500)
+    const doneTimer = setTimeout(onDone, 3800)
+    return () => {
+      clearTimeout(fadeTimer)
+      clearTimeout(doneTimer)
+    }
+  }, [onDone])
 
-  useEffect(() => {
-    if (!fadeOut) return;
-    const timer = setTimeout(onDone, 300);
-    return () => clearTimeout(timer);
-  }, [fadeOut, onDone]);
-
-  const rows = process.stdout?.rows || 24;
-  const topPad = Math.max(0, Math.floor((rows - LOGO_LINES.length - 4) / 2));
-
-  const revealed = LOGO.slice(0, charIndex);
-  const revealedLines = revealed.split("\n");
+  const rows = process.stdout?.rows || 24
+  const topPad = Math.max(0, Math.floor((rows - RAW_LINES.length - 2) / 2))
+  const vocho = blink ? VOCHO_BLINK : VOCHO_NORMAL
+  const lines = useMemo(() => buildCombined(vocho), [vocho])
 
   return (
     <Box flexDirection="column" height={rows}>
       <Box height={topPad} />
       <Box flexDirection="column" alignItems="center">
-        {LOGO_LINES.map((_, i) => (
+        {lines.map((line, i) => (
           <Text
             key={i}
-            color={fadeOut ? "gray" : accent}
+            color={fadeOut ? 'gray' : accent}
             bold
-            dimColor={fadeOut}
+            dimColor={fadeOut || (breath && !fadeOut)}
           >
-            {revealedLines[i] || ""}
+            {line}
           </Text>
         ))}
       </Box>
-      <Box height={1} />
-      <Box justifyContent="center">
-        <Text color={fadeOut ? "gray" : "white"} dimColor={fadeOut}>
-          {showTagline ? "Your private AI secretary, running locally." : ""}
-        </Text>
-      </Box>
-      <Box justifyContent="center">
-        <Text color="gray" dimColor>
-          {showTagline ? "v0.1.0" : ""}
-        </Text>
-      </Box>
+
     </Box>
-  );
+  )
 }
