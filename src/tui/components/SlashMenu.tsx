@@ -12,14 +12,14 @@ interface SlashMenuProps {
   commands: SlashCommandEntry[]
   selectedIndex: number
   visible: boolean
+  width: number
 }
 
-export function SlashMenu({ commands, selectedIndex, visible }: SlashMenuProps) {
+export function SlashMenu({ commands, selectedIndex, visible, width: cols }: SlashMenuProps) {
   const { accent } = useTheme()
 
   if (!visible || commands.length === 0) return null
 
-  const cols = process.stdout?.columns || 80
   const rows = process.stdout?.rows || 24
   const menuWidth = Math.min(50, cols - 4)
   const maxItems = Math.min(commands.length, rows - 8)

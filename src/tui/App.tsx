@@ -21,6 +21,7 @@ import { getRegistry } from '../mcp/registry.js'
 import { SessionList } from './components/SessionList.js'
 import { ColorPicker } from './components/ColorPicker.js'
 import { FirstRunSetup } from './components/FirstRunSetup.js'
+import { Sidebar, SIDEBAR_WIDTH } from './components/Sidebar.js'
 import { ArticleReader, type DigestArticle } from './components/ArticleReader.js'
 import { ThemeProvider } from './context/ThemeContext.js'
 import {
@@ -118,6 +119,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
   const terminalWidth = process.stdout?.columns || 80
   const terminalHeight = process.stdout?.rows || 24
+  const mainContentWidth = terminalWidth - SIDEBAR_WIDTH
   const headerHeight = 1
   const inputHeight = 3
   const footerHeight = 1
@@ -747,47 +749,55 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     (overlay === 'article-reader' && readingArticle !== null)
 
   return (
-    <Box flexDirection="column" height={terminalHeight}>
-      <Header model={MODEL} sessionId={session.id} dimmed={isModalOpen} />
+    <Box flexDirection="row" height={terminalHeight}>
+      {/* Main content column */}
+      <Box flexDirection="column" width={mainContentWidth}>
+        <Header model={MODEL} sessionId={session.id} width={mainContentWidth} dimmed={isModalOpen} />
 
-      <Box height={1} paddingX={1}>
-        <Text color="gray" dimColor={isModalOpen}>{'─'.repeat(Math.max(0, terminalWidth - 4))}</Text>
+        <Box height={1} paddingX={1}>
+          <Text color="gray" dimColor={isModalOpen}>{'─'.repeat(Math.max(0, mainContentWidth - 4))}</Text>
+        </Box>
+
+        <MessageList
+          messages={messages}
+          visibleStart={scrollOffset}
+          visibleCount={contentHeight}
+          terminalWidth={mainContentWidth}
+          dimmed={isModalOpen}
+        />
+
+        <SlashMenu
+          commands={filteredSlashCommands}
+          selectedIndex={slashSelectedIndex}
+          visible={slashActive && filteredSlashCommands.length > 0}
+          width={mainContentWidth}
+        />
+
+        <Input
+          value={input}
+          cursorVisible={cursorVisible}
+          isLoading={isLoading}
+          width={mainContentWidth}
+          dimmed={isModalOpen}
+        />
+
+        <Footer
+          isLoading={isLoading}
+          loadingPos={loadingPos}
+          loadingDir={loadingDir}
+          statusText={statusText}
+          isAtBottom={isAtBottom}
+          hasMoreLines={hasMoreLines}
+          scrollOffset={scrollOffset}
+          digestCount={digestArticles.length}
+          dimmed={isModalOpen}
+        />
       </Box>
 
-      <MessageList
-        messages={messages}
-        visibleStart={scrollOffset}
-        visibleCount={contentHeight}
-        terminalWidth={terminalWidth}
-        dimmed={isModalOpen}
-      />
+      {/* Right sidebar */}
+      <Sidebar isLoading={isLoading} terminalHeight={terminalHeight} />
 
-      <SlashMenu
-        commands={filteredSlashCommands}
-        selectedIndex={slashSelectedIndex}
-        visible={slashActive && filteredSlashCommands.length > 0}
-      />
-
-      <Input
-        value={input}
-        cursorVisible={cursorVisible}
-        isLoading={isLoading}
-        dimmed={isModalOpen}
-      />
-
-      <Footer
-        isLoading={isLoading}
-        loadingPos={loadingPos}
-        loadingDir={loadingDir}
-        statusText={statusText}
-        isAtBottom={isAtBottom}
-        hasMoreLines={hasMoreLines}
-        scrollOffset={scrollOffset}
-        digestCount={digestArticles.length}
-        dimmed={isModalOpen}
-      />
-
-      {/* Floating modal overlay — command palette and article reader */}
+      {/* Floating modal overlay — covers everything including sidebar */}
       {isModalOpen && (
         <Box
           position="absolute"
@@ -797,7 +807,6 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           height={terminalHeight}
           flexDirection="column"
         >
-          {/* Modal content centered on top — the chat behind is dimmed via the dimmed props above */}
           <Box
             position="absolute"
             top={0}

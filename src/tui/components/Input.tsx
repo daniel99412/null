@@ -6,6 +6,7 @@ interface InputProps {
   value: string
   cursorVisible: boolean
   isLoading: boolean
+  width: number
   placeholder?: string
   dimmed?: boolean
 }
@@ -22,11 +23,11 @@ export function Input({
   value,
   cursorVisible,
   isLoading,
+  width: cols,
   placeholder = 'Ask anything...',
   dimmed = false,
 }: InputProps) {
   const { accent } = useTheme()
-  const cols = process.stdout?.columns || 80
 
   // +2 to account for top and bottom border rows
   const contentRows = calcHeight(value, cols)

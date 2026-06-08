@@ -1,16 +1,16 @@
-import React from "react";
-import { Box, Text } from "ink";
-import { useTheme } from "../context/ThemeContext.js";
+import React from 'react'
+import { Box, Text } from 'ink'
+import { useTheme } from '../context/ThemeContext.js'
 
 interface HeaderProps {
-  model: string;
-  sessionId: string;
-  dimmed?: boolean;
+  model: string
+  sessionId: string
+  width: number
+  dimmed?: boolean
 }
 
-export function Header({ model, sessionId, dimmed = false }: HeaderProps) {
-  const { accent } = useTheme();
-  const cols = process.stdout?.columns || 80;
+export function Header({ model, sessionId, width: cols, dimmed = false }: HeaderProps) {
+  const { accent } = useTheme()
 
   return (
     <Box height={1} width={cols} paddingX={1} justifyContent="space-between">
@@ -32,5 +32,5 @@ export function Header({ model, sessionId, dimmed = false }: HeaderProps) {
         </Text>
       </Box>
     </Box>
-  );
+  )
 }
