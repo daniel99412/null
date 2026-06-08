@@ -66,7 +66,7 @@ for (let i = 0; i < combinedHeight; i++) {
     i < VOCHO_SLEEP.length
       ? VOCHO_SLEEP[i].padEnd(LEFT_WIDTH)
       : " ".repeat(LEFT_WIDTH);
-  combinedLines.push(vochoLine + " ".repeat(GAP) + nullLine);
+  combinedLines.push(nullLine + " ".repeat(GAP) + vochoLine);
 }
 
 interface GoodbyeOptions {

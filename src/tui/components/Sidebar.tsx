@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { Box, Text } from "ink";
 import { useTheme } from "../context/ThemeContext.js";
 
-const SIDEBAR_WIDTH = 30;
+const SIDEBAR_WIDTH = 35;
 
 function shortenPath(fullPath: string, maxLen: number): string {
   if (fullPath.length <= maxLen) return fullPath;
@@ -15,7 +15,7 @@ function shortenPath(fullPath: string, maxLen: number): string {
 }
 
 const VOCHO_NORMAL: [string, string] = [" .(___).", "(o\\_|_/o)"];
-const VOCHO_BLINK: [string, string] = [" .(___).", "(-\\_|_-)"];
+const VOCHO_BLINK: [string, string] = [" .(___).", "(-\\_|_/-)"];
 const VOCHO_THINK_L: [string, string] = [" .(___).", "(o\\_|_/O)"];
 const VOCHO_THINK_R: [string, string] = [" .(___).", "(O\\_|_/o)"];
 
@@ -25,7 +25,11 @@ interface SidebarProps {
   sessionName: string;
 }
 
-export function Sidebar({ isLoading, terminalHeight, sessionName }: SidebarProps) {
+export function Sidebar({
+  isLoading,
+  terminalHeight,
+  sessionName,
+}: SidebarProps) {
   const { accent } = useTheme();
   const [blink, setBlink] = useState(false);
   const [thinkPhase, setThinkPhase] = useState(false);
@@ -80,18 +84,8 @@ export function Sidebar({ isLoading, terminalHeight, sessionName }: SidebarProps
         <Text color="gray">{"─".repeat(SIDEBAR_WIDTH - 2)}</Text>
       </Box>
 
-      {/* Session name */}
-      <Box justifyContent="center" height={1} paddingX={1}>
-        <Text color="white" wrap="truncate-end">{sessionName}</Text>
-      </Box>
-
-      {/* Vochito centered */}
-      <Box
-        flexGrow={1}
-        flexDirection="column"
-        alignItems="center"
-        justifyContent="center"
-      >
+      {/* Vochito + Session */}
+      <Box flexDirection="row" paddingX={1} paddingTop={1}>
         <Box flexDirection="column" alignItems="center">
           <Text color={accent} dimColor={!breath}>
             {vocho[0]}
@@ -100,18 +94,32 @@ export function Sidebar({ isLoading, terminalHeight, sessionName }: SidebarProps
             {vocho[1]}
           </Text>
         </Box>
+        <Box flexDirection="column" alignItems="center" paddingX={1}>
+          <Text color="gray">│</Text>
+          <Text color="gray">│</Text>
+        </Box>
+        <Box flexDirection="column" justifyContent="center">
+          <Text color="gray">Session</Text>
+          <Text color="white" wrap="truncate-end">
+            {sessionName}
+          </Text>
+        </Box>
       </Box>
 
+      <Box flexGrow={1} />
+
       {/* Working directory */}
-      <Box justifyContent="center" height={1}>
+      <Box height={1} paddingX={1}>
         <Text color="white" dimColor>
           {cwd}
         </Text>
       </Box>
 
       {/* null · v0.1.0 */}
-      <Box justifyContent="center" height={1}>
-        <Text color="gray">· null · v0.1.0</Text>
+      <Box height={1} paddingX={1}>
+        <Text color="gray">
+          <Text color={accent}>· null</Text> v0.1.0
+        </Text>
       </Box>
     </Box>
   );

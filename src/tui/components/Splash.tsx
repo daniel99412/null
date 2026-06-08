@@ -20,8 +20,8 @@ const GAP = 4
 function buildCombined(vocho: string[]): string[] {
   const combined: string[] = []
   for (let i = 0; i < RAW_LINES.length; i++) {
-    if (i >= 1 && i <= 2) {
-      combined.push(RAW_LINES[i] + ' '.repeat(GAP) + vocho[i - 1])
+    if (i >= 2 && i <= 3) {
+      combined.push(RAW_LINES[i] + ' '.repeat(GAP) + vocho[i - 2])
     } else {
       combined.push(RAW_LINES[i])
     }
