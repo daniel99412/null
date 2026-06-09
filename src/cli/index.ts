@@ -4,10 +4,10 @@ import { processQuery } from '../core/agent.js'
 import { checkHealth } from '../core/health.js'
 import { runSetup } from './setup.js'
 import { initMCPServers } from '../mcp/init.js'
-import { loadConfig, setAccentColor, setModel } from '../config/index.js'
+import { loadConfig, setAccentColor, setCodeModel, setModel, setRouterModel } from '../config/index.js'
 import type { AccentColor } from '../config/index.js'
 import { cleanCaches } from '../memory/database.js'
-import { getDefaultClient } from '../core/llm-client.js'
+import { getClientForQuery } from '../core/llm-client.js'
 import {
   buildDocumentContextMessage,
   buildDocumentResponseInstruction,
@@ -52,7 +52,7 @@ export function runCLI(): void {
   configCmd
     .command('set')
     .description('Set a configuration value')
-    .argument('<key>', 'config key (accent-color, weather-key, model)')
+    .argument('<key>', 'config key (accent-color, weather-key, model, code-model, router-model)')
     .argument('<value>', 'value')
     .action((key: string, value: string) => {
       if (key === 'accent-color') {
@@ -71,8 +71,14 @@ export function runCLI(): void {
       } else if (key === 'model') {
         setModel(value)
         console.log(`Model set to: ${value}`)
+      } else if (key === 'code-model') {
+        setCodeModel(value)
+        console.log(`Code model set to: ${value}`)
+      } else if (key === 'router-model') {
+        setRouterModel(value)
+        console.log(`Router model set to: ${value}`)
       } else {
-        console.error(`Unknown key: ${key}. Valid keys: accent-color, weather-key, model`)
+        console.error(`Unknown key: ${key}. Valid keys: accent-color, weather-key, model, code-model, router-model`)
         process.exit(1)
       }
     })
@@ -80,7 +86,7 @@ export function runCLI(): void {
   // Clean caches command
   program
     .command('clean')
-    .description('Clear all cached data (search, ESPN, news)')
+    .description('Clear all cached data (search, sports, news)')
     .action(() => {
       const deleted = cleanCaches()
       console.log(`Cleared ${deleted} cached entries.`)
@@ -147,7 +153,7 @@ export function runCLI(): void {
         if (documentParts.length > 0) {
           const userQuestion = stripDocumentRefs(prompt) || 'Resume el contenido de los archivos adjuntos.'
           const docInstruction = buildDocumentResponseInstruction(userQuestion)
-          const client = getDefaultClient()
+          const client = getClientForQuery(userQuestion)
           let buffer = ''
           await client.streamChat(
             [
@@ -187,7 +193,7 @@ export function runCLI(): void {
           ? `You are Null. Use the following data to answer the user.\n\n${result.searchContext}`
           : 'You are Null, a helpful assistant. Answer concisely.'
 
-        const client = getDefaultClient()
+        const client = getClientForQuery(result.userContent)
         let buffer = ''
         await client.streamChat(
           [

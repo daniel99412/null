@@ -1,9 +1,9 @@
 /**
- * ESPN API service — multi-endpoint sports data fetcher.
+ * Sports API service — multi-endpoint sports data fetcher.
  *
  * Supports: scoreboard, team news, league news, standings, game summary.
  * All public functions return plain data objects suitable for LLM context.
- * Cache is handled in espn-cache.ts and integrated in buildSportsContext.
+ * Cache is handled in sports-cache.ts and integrated in buildSportsContext.
  */
 
 import { debugLog } from '../utils/debug.js'
@@ -22,13 +22,13 @@ import {
   setCachedStandings,
   getCachedSummary,
   setCachedSummary,
-} from '../memory/espn-cache.js'
+} from '../memory/sports-cache.js'
 
 // ---------------------------------------------------------------------------
 // Types — public
 // ---------------------------------------------------------------------------
 
-export interface ESPNCompetitor {
+export interface SportsCompetitor {
   homeAway: 'home' | 'away'
   team: string
   abbreviation: string
@@ -38,14 +38,14 @@ export interface ESPNCompetitor {
 
 export type GameStatus = 'scheduled' | 'in_progress' | 'final'
 
-export interface ESPNGame {
+export interface SportsGame {
   id: string
   name: string
   date: string          // ISO 8601 UTC
   status: GameStatus
   statusDetail: string  // e.g. "FT", "HT", "2nd Half 34'"
-  home: ESPNCompetitor
-  away: ESPNCompetitor
+  home: SportsCompetitor
+  away: SportsCompetitor
   venue?: string
   /** Tournament phase for this specific game (e.g. "Cuartos de Final", "Semifinales") */
   phase?: string
@@ -53,17 +53,17 @@ export interface ESPNGame {
   note?: string
 }
 
-export interface ESPNScoreboard {
+export interface SportsScoreboard {
   league: string
   leagueSlug: string
   season?: string
   /** Current phase/stage of the tournament from league-level season type */
   seasonPhase?: string
-  games: ESPNGame[]
+  games: SportsGame[]
   effectiveRange: DateRange
 }
 
-export interface ESPNNewsArticle {
+export interface SportsNewsArticle {
   headline: string
   description?: string
   published: string   // ISO 8601
@@ -71,7 +71,7 @@ export interface ESPNNewsArticle {
   link?: string
 }
 
-export interface ESPNStandingsEntry {
+export interface SportsStandingsEntry {
   team: string
   abbreviation: string
   wins: number
@@ -83,16 +83,16 @@ export interface ESPNStandingsEntry {
   note?: string       // e.g. "Clinched Playoffs", "Relegated"
 }
 
-export interface ESPNStandings {
+export interface SportsStandings {
   league: string
   season?: string
   groups: {
     name: string
-    entries: ESPNStandingsEntry[]
+    entries: SportsStandingsEntry[]
   }[]
 }
 
-export interface ESPNGameSummary {
+export interface SportsGameSummary {
   gameId: string
   home: string
   away: string
@@ -108,18 +108,18 @@ export interface ESPNGameSummary {
  * Contains all fetched data for a query; caller uses it to build
  * the LLM context string and the display table.
  */
-export interface ESPNSportsContext {
+export interface SportsContext {
   /** Human-readable league name */
   league: string
   leagueSlug: string
   /** Scoreboard with games for the relevant period */
-  scoreboard?: ESPNScoreboard
+  scoreboard?: SportsScoreboard
   /** League or team news articles */
-  news?: ESPNNewsArticle[]
+  news?: SportsNewsArticle[]
   /** League standings table */
-  standings?: ESPNStandings
+  standings?: SportsStandings
   /** Detailed summary for specific recent games */
-  gameSummaries?: ESPNGameSummary[]
+  gameSummaries?: SportsGameSummary[]
   /** If a specific team was asked about, its name */
   focusTeam?: string
 }
@@ -130,38 +130,38 @@ export interface DateRange {
 }
 
 // ---------------------------------------------------------------------------
-// Detection helpers — backed by espn_leagues + espn_teams SQLite tables
+// Detection helpers — backed by the sports catalog SQLite tables.
 // ---------------------------------------------------------------------------
 
 export function detectLeague(query: string): string | null {
   const q = query.toLowerCase()
   const db = getDb()
 
-  // Check espn_leagues first (direct league aliases)
+  // Check league aliases first.
   const leagueRows = db
     .prepare('SELECT alias, league_slug FROM espn_leagues ORDER BY length(alias) DESC')
     .all() as { alias: string; league_slug: string }[]
 
   for (const row of leagueRows) {
     if (q.includes(row.alias)) {
-      debugLog(`[espn] detectLeague: "${row.alias}" → ${row.league_slug}`)
+      debugLog(`[sports] detectLeague: "${row.alias}" → ${row.league_slug}`)
       return row.league_slug
     }
   }
 
-  // Fallback: check espn_teams (infer league from team mention)
+  // Fallback: check team aliases and infer league from team mention.
   const teamRows = db
     .prepare('SELECT alias, league_slug FROM espn_teams ORDER BY length(alias) DESC')
     .all() as { alias: string; league_slug: string }[]
 
   for (const row of teamRows) {
     if (q.includes(row.alias)) {
-      debugLog(`[espn] detectLeague via team: "${row.alias}" → ${row.league_slug}`)
+      debugLog(`[sports] detectLeague via team: "${row.alias}" → ${row.league_slug}`)
       return row.league_slug
     }
   }
 
-  debugLog(`[espn] detectLeague: no match for query "${q}"`)
+  debugLog(`[sports] detectLeague: no match for query "${q}"`)
   return null
 }
 
@@ -175,7 +175,7 @@ export function detectTeam(query: string): { name: string; id?: string; leagueSl
 
   for (const row of rows) {
     if (q.includes(row.alias)) {
-      debugLog(`[espn] detectTeam: "${row.alias}" → ${row.canonical} in ${row.league_slug} (id: ${row.espn_id ?? 'unknown'})`)
+      debugLog(`[sports] detectTeam: "${row.alias}" → ${row.canonical} in ${row.league_slug} (id: ${row.espn_id ?? 'unknown'})`)
       return {
         name: row.canonical,
         id: row.espn_id ?? undefined,
@@ -184,7 +184,7 @@ export function detectTeam(query: string): { name: string; id?: string; leagueSl
     }
   }
 
-  debugLog(`[espn] detectTeam: no team match for query "${q}"`)
+  debugLog(`[sports] detectTeam: no team match for query "${q}"`)
   return null
 }
 
@@ -200,13 +200,13 @@ export function getSportForLeague(leagueSlug: string): string {
 // Date helpers
 // ---------------------------------------------------------------------------
 
-export interface ESPNDateIntent {
+export interface SportsDateIntent {
   type: 'lastMatchday' | 'range'
 }
 
 export type DateIntent = 'lastMatchday' | 'range'
 
-function toESPNDate(date: Date): string {
+function toSportsDate(date: Date): string {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const d = String(date.getDate()).padStart(2, '0')
@@ -337,27 +337,27 @@ export function detectDateRange(query: string): DateRange {
 // Raw API type interfaces (internal)
 // ---------------------------------------------------------------------------
 
-interface ESPNScoreboardRaw {
+interface SportsScoreboardRaw {
   leagues?: { name?: string; season?: { displayName?: string; type?: { name?: string } } }[]
-  events?: ESPNEventRaw[]
+  events?: SportsEventRaw[]
 }
 
-interface ESPNEventRaw {
+interface SportsEventRaw {
   id?: string
   name?: string
   date?: string
   season?: { slug?: string; type?: number }
-  competitions?: ESPNCompetitionRaw[]
+  competitions?: SportsCompetitionRaw[]
 }
 
-interface ESPNCompetitionRaw {
+interface SportsCompetitionRaw {
   status?: { type?: { name?: string; detail?: string } }
   venue?: { fullName?: string }
-  competitors?: ESPNCompetitorRaw[]
+  competitors?: SportsCompetitorRaw[]
   notes?: { text?: string }[]
 }
 
-interface ESPNCompetitorRaw {
+interface SportsCompetitorRaw {
   homeAway?: string
   score?: string
   winner?: boolean
@@ -389,7 +389,7 @@ function slugToPhaseLabel(slug: string | undefined): string | undefined {
   return undefined
 }
 
-function parseCompetitor(raw: ESPNCompetitorRaw): ESPNCompetitor {
+function parseCompetitor(raw: SportsCompetitorRaw): SportsCompetitor {
   return {
     homeAway: raw.homeAway === 'home' ? 'home' : 'away',
     team: raw.team?.displayName ?? 'Unknown',
@@ -399,11 +399,11 @@ function parseCompetitor(raw: ESPNCompetitorRaw): ESPNCompetitor {
   }
 }
 
-const ESPN_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; NullCLI/1.0)' }
+const SPORTS_API_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; NullCLI/1.0)' }
 
-async function espnFetch(url: string): Promise<unknown> {
-  const res = await fetch(url, { headers: ESPN_HEADERS })
-  if (!res.ok) throw new Error(`ESPN API ${res.status}: ${url}`)
+async function sportsApiFetch(url: string): Promise<unknown> {
+  const res = await fetch(url, { headers: SPORTS_API_HEADERS })
+  if (!res.ok) throw new Error(`Sports API ${res.status}: ${url}`)
   return res.json()
 }
 
@@ -411,9 +411,9 @@ async function espnFetch(url: string): Promise<unknown> {
 // Scoreboard
 // ---------------------------------------------------------------------------
 
-function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string, range: DateRange): ESPNScoreboard {
+function parseScoreboard(raw: SportsScoreboardRaw, leagueSlug: string, range: DateRange): SportsScoreboard {
   const league = raw.leagues?.[0]
-  const games: ESPNGame[] = []
+  const games: SportsGame[] = []
 
   for (const event of raw.events ?? []) {
     const comp = event.competitions?.[0]
@@ -447,11 +447,11 @@ function parseScoreboard(raw: ESPNScoreboardRaw, leagueSlug: string, range: Date
   }
 }
 
-export async function getScoreboard(leagueSlug: string, range: DateRange): Promise<ESPNScoreboard> {
+export async function getScoreboard(leagueSlug: string, range: DateRange): Promise<SportsScoreboard> {
   const sport = getSportForLeague(leagueSlug)
-  const dateParam = `${toESPNDate(range.from)}-${toESPNDate(range.to)}`
+  const dateParam = `${toSportsDate(range.from)}-${toSportsDate(range.to)}`
   const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/scoreboard?dates=${dateParam}`
-  const raw = await espnFetch(url) as ESPNScoreboardRaw
+  const raw = await sportsApiFetch(url) as SportsScoreboardRaw
   return parseScoreboard(raw, leagueSlug, range)
 }
 
@@ -462,11 +462,11 @@ export async function getLastMatchdayRange(leagueSlug: string): Promise<DateRang
   from.setHours(0, 0, 0, 0)
 
   const sport = getSportForLeague(leagueSlug)
-  const dateParam = `${toESPNDate(from)}-${toESPNDate(to)}`
+  const dateParam = `${toSportsDate(from)}-${toSportsDate(to)}`
   const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/scoreboard?dates=${dateParam}`
 
   try {
-    const raw = await espnFetch(url) as ESPNScoreboardRaw
+    const raw = await sportsApiFetch(url) as SportsScoreboardRaw
     const games = parseScoreboard(raw, leagueSlug, { from, to }).games
     const finals = games.filter((g) => g.status === 'final')
     if (finals.length === 0) return lastWeekendRange()
@@ -502,7 +502,7 @@ export async function getLastMatchdayRange(leagueSlug: string): Promise<DateRang
 // News
 // ---------------------------------------------------------------------------
 
-interface ESPNNewsRaw {
+interface SportsNewsRaw {
   articles?: {
     headline?: string
     description?: string
@@ -512,7 +512,7 @@ interface ESPNNewsRaw {
   }[]
 }
 
-function parseNews(raw: ESPNNewsRaw): ESPNNewsArticle[] {
+function parseNews(raw: SportsNewsRaw): SportsNewsArticle[] {
   return (raw.articles ?? []).map((a) => ({
     headline: a.headline ?? '',
     description: a.description,
@@ -528,20 +528,20 @@ function parseNews(raw: ESPNNewsRaw): ESPNNewsArticle[] {
 /**
  * Fetch recent news for a league (e.g. Liga MX, EPL).
  */
-export async function getLeagueNews(leagueSlug: string, limit = 5): Promise<ESPNNewsArticle[]> {
+export async function getLeagueNews(leagueSlug: string, limit = 5): Promise<SportsNewsArticle[]> {
   const sport = getSportForLeague(leagueSlug)
   const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/news?limit=${limit}`
-  const raw = await espnFetch(url) as ESPNNewsRaw
+  const raw = await sportsApiFetch(url) as SportsNewsRaw
   return parseNews(raw)
 }
 
 /**
  * Fetch recent news for a specific team.
  */
-export async function getTeamNews(leagueSlug: string, teamId: string, limit = 5): Promise<ESPNNewsArticle[]> {
+export async function getTeamNews(leagueSlug: string, teamId: string, limit = 5): Promise<SportsNewsArticle[]> {
   const sport = getSportForLeague(leagueSlug)
   const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/teams/${teamId}/news?limit=${limit}`
-  const raw = await espnFetch(url) as ESPNNewsRaw
+  const raw = await sportsApiFetch(url) as SportsNewsRaw
   return parseNews(raw)
 }
 
@@ -549,7 +549,7 @@ export async function getTeamNews(leagueSlug: string, teamId: string, limit = 5)
 // Standings
 // ---------------------------------------------------------------------------
 
-interface ESPNStandingsRaw {
+interface SportsStandingsRaw {
   uid?: string
   season?: { year?: number; displayName?: string }
   name?: string
@@ -575,8 +575,8 @@ interface ESPNStandingsRaw {
 }
 
 function parseStandingsEntries(
-  entries: NonNullable<NonNullable<ESPNStandingsRaw['children']>[0]['standings']>['entries'],
-): ESPNStandingsEntry[] {
+  entries: NonNullable<NonNullable<SportsStandingsRaw['children']>[0]['standings']>['entries'],
+): SportsStandingsEntry[] {
   return (entries ?? []).map((e) => {
     const stat = (name: string) => {
       const s = (e.stats ?? []).find((s) => s.name === name)
@@ -599,14 +599,14 @@ function parseStandingsEntries(
 /**
  * Fetch league standings. Soccer uses /apis/v2/ (site/v2 returns empty).
  */
-export async function getStandings(leagueSlug: string): Promise<ESPNStandings> {
+export async function getStandings(leagueSlug: string): Promise<SportsStandings> {
   const sport = getSportForLeague(leagueSlug)
   // Soccer standings require /apis/v2/ not /apis/site/v2/
   const isSoccer = sport === 'soccer'
   const baseUrl = isSoccer
     ? `https://site.api.espn.com/apis/v2/sports/${sport}/${leagueSlug}/standings`
     : `https://site.api.espn.com/apis/v2/sports/${sport}/${leagueSlug}/standings`
-  const raw = await espnFetch(baseUrl) as ESPNStandingsRaw
+  const raw = await sportsApiFetch(baseUrl) as SportsStandingsRaw
 
   const leagueName = raw.name ?? leagueSlug
   const season = raw.season?.displayName
@@ -636,7 +636,7 @@ export async function getStandings(leagueSlug: string): Promise<ESPNStandings> {
 // Game summary
 // ---------------------------------------------------------------------------
 
-interface ESPNSummaryRaw {
+interface SportsSummaryRaw {
   header?: {
     competitions?: {
       competitors?: { team?: { displayName?: string }; score?: string }[]
@@ -657,14 +657,14 @@ interface ESPNSummaryRaw {
   }[]
 }
 
-export async function getGameSummary(leagueSlug: string, gameId: string): Promise<ESPNGameSummary | null> {
+export async function getGameSummary(leagueSlug: string, gameId: string): Promise<SportsGameSummary | null> {
   const sport = getSportForLeague(leagueSlug)
   const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${leagueSlug}/summary?event=${gameId}`
   try {
-    const raw = await espnFetch(url) as ESPNSummaryRaw
+    const raw = await sportsApiFetch(url) as SportsSummaryRaw
     const comp = raw.header?.competitions?.[0]
     const competitors = comp?.competitors ?? []
-    const home = competitors.find((_, i) => i === 0) // ESPN puts home first in summary
+    const home = competitors.find((_, i) => i === 0) // provider puts home first in summary
     const away = competitors.find((_, i) => i === 1)
 
     const keyEvents = (raw.keyEvents ?? []).slice(0, 10).map((e) => ({
@@ -672,7 +672,7 @@ export async function getGameSummary(leagueSlug: string, gameId: string): Promis
       text: e.text ?? '',
     }))
 
-    const topScorers: ESPNGameSummary['topScorers'] = []
+    const topScorers: SportsGameSummary['topScorers'] = []
     for (const teamLeader of raw.leaders ?? []) {
       const teamName = teamLeader.team?.displayName ?? ''
       for (const cat of teamLeader.leaders ?? []) {
@@ -719,7 +719,7 @@ export interface SportsCommentaryContext {
  * This keeps the model focused on what actually just happened.
  */
 export function buildSportsCommentaryPrompt(
-  scoreboard: ESPNScoreboard,
+  scoreboard: SportsScoreboard,
   userQuery: string,
   tz: string,
   preferencesContext?: string,
@@ -738,7 +738,7 @@ export function buildSportsCommentaryPrompt(
   const recentFinals = sortedFinals.filter((g) => new Date(g.date) >= recentCutoff)
   const priorFinals = sortedFinals.filter((g) => new Date(g.date) < recentCutoff)
 
-  const fmtGame = (g: ESPNGame): string => {
+  const fmtGame = (g: SportsGame): string => {
     const date = new Date(g.date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
     const phase = g.phase ? ` [${g.phase}]` : ''
     const note = g.note ? ` — ${g.note}` : ''
@@ -749,7 +749,7 @@ export function buildSportsCommentaryPrompt(
     return `• ${result}${phase}${note} — ${date}`
   }
 
-  const fmtScheduled = (g: ESPNGame): string => {
+  const fmtScheduled = (g: SportsGame): string => {
     const date = new Date(g.date)
     const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
     const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz })
@@ -791,7 +791,7 @@ export function buildSportsCommentaryPrompt(
 
   const userInstruction = `User question: "${userQuery}"
 
-Write 2-4 lines of sports commentary in English.
+Write 2-4 lines of sports commentary. Reply in the same language the user used.
 
 RULES — follow strictly:
 1. Focus on the MOST RECENT RESULTS (section above)
@@ -815,17 +815,17 @@ ${!hasNext && !hasRecent ? '8. Not enough data → respond only: "No information
  * Format games as a Markdown table grouped by phase.
  * Notes are intentionally NOT shown in cells — they are passed to LLM via context only.
  */
-export function formatScoreboardTable(games: ESPNGame[], localTZ?: string): string {
+export function formatScoreboardTable(games: SportsGame[], localTZ?: string): string {
   if (games.length === 0) return ''
 
-  const groups: Map<string, ESPNGame[]> = new Map()
+  const groups: Map<string, SportsGame[]> = new Map()
   for (const game of games) {
     const key = game.phase ?? ''
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(game)
   }
 
-  const buildRow = (game: ESPNGame): string => {
+  const buildRow = (game: SportsGame): string => {
     const home = game.home.team
     const away = game.away.team
     let center: string
@@ -870,7 +870,7 @@ export function formatScoreboardTable(games: ESPNGame[], localTZ?: string): stri
 // Context formatters — for LLM injection (includes notes, phase, standings, news)
 // ---------------------------------------------------------------------------
 
-export function formatScoreboardContext(scoreboard: ESPNScoreboard, range: DateRange): string {
+export function formatScoreboardContext(scoreboard: SportsScoreboard, range: DateRange): string {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const fromStr = range.from.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz })
   const toStr = range.to.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz })
@@ -887,7 +887,7 @@ export function formatScoreboardContext(scoreboard: ESPNScoreboard, range: DateR
     '',
   ].filter(Boolean)
 
-  const formatGameLine = (game: ESPNGame): string => {
+  const formatGameLine = (game: SportsGame): string => {
     const date = new Date(game.date)
     const localDate = date.toLocaleDateString('es-MX', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz })
     const phaseNote = [game.phase, game.note].filter(Boolean).join(' — ')
@@ -927,7 +927,7 @@ export function formatScoreboardContext(scoreboard: ESPNScoreboard, range: DateR
   return lines.join('\n')
 }
 
-function formatNewsContext(articles: ESPNNewsArticle[], label: string): string {
+function formatNewsContext(articles: SportsNewsArticle[], label: string): string {
   if (articles.length === 0) return ''
   const lines = [`Noticias — ${label}:`]
   for (const a of articles) {
@@ -938,7 +938,7 @@ function formatNewsContext(articles: ESPNNewsArticle[], label: string): string {
   return lines.join('\n')
 }
 
-function formatStandingsContext(standings: ESPNStandings): string {
+function formatStandingsContext(standings: SportsStandings): string {
   if (standings.groups.length === 0) return ''
   const lines = [`Tabla de posiciones — ${standings.league}${standings.season ? ` (${standings.season})` : ''}:`]
   for (const group of standings.groups) {
@@ -956,7 +956,7 @@ function formatStandingsContext(standings: ESPNStandings): string {
   return lines.join('\n')
 }
 
-function formatSummaryContext(summary: ESPNGameSummary): string {
+function formatSummaryContext(summary: SportsGameSummary): string {
   const lines = [`Resumen — ${summary.home} ${summary.homeScore} - ${summary.awayScore} ${summary.away} (${summary.status}):`]
   if (summary.keyEvents.length > 0) {
     lines.push('  Eventos clave:')
@@ -991,10 +991,10 @@ export interface SportsQueryOutput {
   tableOutput: string
   seasonPhase?: string
   /** Raw scoreboard — passed through to TUI for structured commentary prompt */
-  scoreboard?: ESPNScoreboard
+  scoreboard?: SportsScoreboard
   /** True when the query is primarily about news/headlines — TUI skips scoreboard commentary */
   newsIntent?: boolean
-  /** Number of news articles found specifically about the focus team (0 = weak ESPN context) */
+  /** Number of news articles found specifically about the focus team (0 = weak sports context) */
   teamNewsCount?: number
   /** Focus team name, if one was detected */
   focusTeamName?: string
@@ -1012,7 +1012,7 @@ export function detectNewsIntent(query: string): boolean {
 export async function buildSportsContext(query: string): Promise<SportsQueryOutput | null> {
   const leagueSlug = detectLeague(query)
   if (!leagueSlug) {
-    debugLog(`[espn] buildSportsContext: no league detected — returning null`)
+    debugLog(`[sports] buildSportsContext: no league detected — returning null`)
     return null
   }
 
@@ -1022,7 +1022,7 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   const newsIntent = detectNewsIntent(query)
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
 
-  debugLog(`[espn] buildSportsContext: league=${leagueSlug} team=${focusTeam?.name ?? 'none'} intent=${intent} hasExplicit=${hasExplicit} newsIntent=${newsIntent}`)
+  debugLog(`[sports] buildSportsContext: league=${leagueSlug} team=${focusTeam?.name ?? 'none'} intent=${intent} hasExplicit=${hasExplicit} newsIntent=${newsIntent}`)
 
   // --- Resolve scoreboard date range ---
   let scoreboardRange: DateRange
@@ -1034,29 +1034,29 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
 
   // --- Cached scoreboard fetch ---
   const scoreboardKey = buildCacheKey(leagueSlug, scoreboardRange.from, scoreboardRange.to)
-  let scoreboard: ESPNScoreboard | undefined = getCachedScoreboard(scoreboardKey) ?? undefined
+  let scoreboard: SportsScoreboard | undefined = getCachedScoreboard(scoreboardKey) ?? undefined
   if (!scoreboard) {
     try {
-      debugLog(`[espn] fetching scoreboard: ${leagueSlug} ${scoreboardRange.from.toISOString().slice(0,10)} – ${scoreboardRange.to.toISOString().slice(0,10)}`)
+      debugLog(`[sports] fetching scoreboard: ${leagueSlug} ${scoreboardRange.from.toISOString().slice(0,10)} – ${scoreboardRange.to.toISOString().slice(0,10)}`)
       scoreboard = await getScoreboard(leagueSlug, scoreboardRange)
-      debugLog(`[espn] scoreboard: ${scoreboard.games.length} games`)
+      debugLog(`[sports] scoreboard: ${scoreboard.games.length} games`)
       setCachedScoreboard(scoreboardKey, scoreboard)
     } catch (err) {
-      debugLog(`[espn] scoreboard fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+      debugLog(`[sports] scoreboard fetch failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   } else {
-    debugLog(`[espn] scoreboard cache hit`)
+    debugLog(`[sports] scoreboard cache hit`)
   }
 
   // --- Cached news fetch ---
   const newsKey = buildNewsCacheKey(leagueSlug, focusTeam?.id)
-  let news: ESPNNewsArticle[] | undefined = getCachedNews(newsKey) ?? undefined
+  let news: SportsNewsArticle[] | undefined = getCachedNews(newsKey) ?? undefined
   // Tracks how many articles specifically matched the focus team (0 = weak context)
   let teamNewsCount = 0
   if (!news) {
     try {
       if (focusTeam?.id) {
-        debugLog(`[espn] fetching team news: ${focusTeam.id}`)
+        debugLog(`[sports] fetching team news: ${focusTeam.id}`)
         const teamNews = await getTeamNews(leagueSlug, focusTeam.id, 5)
         if (teamNews.length > 0) {
           news = teamNews
@@ -1064,7 +1064,7 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
         } else {
           // Team news endpoint returned empty (common for Liga MX) — fall back to
           // league news and filter articles that mention the team by name
-          debugLog(`[espn] team news empty — falling back to league news filtered by team`)
+          debugLog(`[sports] team news empty — falling back to league news filtered by team`)
           const leagueNews = await getLeagueNews(leagueSlug, 20)
           const teamNameLower = focusTeam.name.toLowerCase()
           const filtered = leagueNews.filter((a) =>
@@ -1074,20 +1074,20 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
           )
           teamNewsCount = filtered.length
           news = filtered.length > 0 ? filtered.slice(0, 5) : leagueNews.slice(0, 5)
-          debugLog(`[espn] filtered league news: ${filtered.length} matching (teamNewsCount=${teamNewsCount})`)
+          debugLog(`[sports] filtered league news: ${filtered.length} matching (teamNewsCount=${teamNewsCount})`)
         }
       } else {
-        debugLog(`[espn] fetching league news: ${leagueSlug}`)
+        debugLog(`[sports] fetching league news: ${leagueSlug}`)
         news = await getLeagueNews(leagueSlug, 5)
         teamNewsCount = news.length
       }
-      debugLog(`[espn] news: ${news.length} articles`)
+      debugLog(`[sports] news: ${news.length} articles`)
       setCachedNews(newsKey, news)
     } catch (err) {
-      debugLog(`[espn] news fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+      debugLog(`[sports] news fetch failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   } else {
-    debugLog(`[espn] news cache hit`)
+    debugLog(`[sports] news cache hit`)
     // Recompute teamNewsCount from cache when focusTeam present
     if (focusTeam) {
       const t = focusTeam.name.toLowerCase()
@@ -1102,22 +1102,22 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
 
   // --- Cached standings fetch ---
   const standingsKey = buildStandingsCacheKey(leagueSlug)
-  let standings: ESPNStandings | undefined = getCachedStandings(standingsKey) ?? undefined
+  let standings: SportsStandings | undefined = getCachedStandings(standingsKey) ?? undefined
   if (!standings) {
     try {
-      debugLog(`[espn] fetching standings: ${leagueSlug}`)
+      debugLog(`[sports] fetching standings: ${leagueSlug}`)
       standings = await getStandings(leagueSlug)
-      debugLog(`[espn] standings: ${standings.groups.length} groups`)
+      debugLog(`[sports] standings: ${standings.groups.length} groups`)
       setCachedStandings(standingsKey, standings)
     } catch (err) {
-      debugLog(`[espn] standings fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+      debugLog(`[sports] standings fetch failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   } else {
-    debugLog(`[espn] standings cache hit`)
+    debugLog(`[sports] standings cache hit`)
   }
 
   // --- Optionally fetch game summaries for recent finals (max 2, only if team focused) ---
-  let summaries: ESPNGameSummary[] = []
+  let summaries: SportsGameSummary[] = []
   if (focusTeam && scoreboard) {
     const teamName = focusTeam.name.toLowerCase()
     const recentFinals = scoreboard.games
@@ -1139,7 +1139,7 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
         })
       )
       summaries = summaryResults
-        .filter((r): r is PromiseFulfilledResult<ESPNGameSummary> =>
+        .filter((r): r is PromiseFulfilledResult<SportsGameSummary> =>
           r.status === 'fulfilled' && r.value !== null
         )
         .map((r) => r.value)
@@ -1159,11 +1159,11 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
 
     // When news intent with a focus team, only show that team's games in the table
     const teamFilterFn = (focusTeam && newsIntent)
-      ? (g: ESPNGame) => {
+      ? (g: SportsGame) => {
           const t = focusTeam.name.toLowerCase()
           return g.home.team.toLowerCase().includes(t) || g.away.team.toLowerCase().includes(t)
         }
-      : (_g: ESPNGame) => true
+      : (_g: SportsGame) => true
 
     const live = scoreboard.games.filter((g) => g.status === 'in_progress' && teamFilterFn(g))
     const finals = scoreboard.games.filter((g) => g.status === 'final' && teamFilterFn(g))
@@ -1207,7 +1207,7 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
     // For news intent with focus team, only include that team's game lines in context
     if (focusTeam && newsIntent) {
       const teamName = focusTeam.name.toLowerCase()
-      const filtered: ESPNScoreboard = {
+      const filtered: SportsScoreboard = {
         ...scoreboard,
         games: scoreboard.games.filter(
           (g) => g.home.team.toLowerCase().includes(teamName) || g.away.team.toLowerCase().includes(teamName)
@@ -1239,7 +1239,7 @@ export async function buildSportsContext(query: string): Promise<SportsQueryOutp
   }
 
   contextParts.push('')
-  contextParts.push('INSTRUCCIONES: Usa estos datos para responder la pregunta del usuario. Menciona marcadores específicos, fases del torneo, posiciones en la tabla y noticias relevantes. NO repitas datos que ya están en la tabla visual. Responde en el idioma en que el usuario escribió.')
+  contextParts.push('INSTRUCTIONS: Use this data to answer the user question. Mention specific scores, tournament phases, table positions, and relevant news. Do NOT repeat data that is already shown in the visual table. Reply in the same language the user used.')
 
   return {
     llmContext: contextParts.join('\n'),

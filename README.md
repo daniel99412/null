@@ -47,10 +47,11 @@ npm link
 - Node.js 18+
 - Ollama installed and running locally
 
-Pull a model:
+Pull the recommended chat and code models:
 
 ```bash
-ollama pull qwen2.5-coder:7b
+ollama pull qwen3.5:4b-q4_K_M
+ollama pull qwen2.5-coder:3b
 ```
 
 ---

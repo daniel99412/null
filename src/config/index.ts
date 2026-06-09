@@ -5,7 +5,8 @@ import os from 'os'
 const CONFIG_DIR = path.join(os.homedir(), '.null-cli')
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
 
-export const DEFAULT_MODEL = 'qwen2.5-coder:7b'
+export const DEFAULT_MODEL = 'qwen3.5:4b-q4_K_M'
+export const CODE_MODEL = 'qwen2.5-coder:3b'
 export const ROUTER_MODEL = 'qwen2.5:3b'
 export const DEFAULT_OLLAMA_URL = 'http://localhost:11434'
 
@@ -43,6 +44,7 @@ export interface NullConfig {
   openWeatherApiKey?: string
   cachedLocation?: CachedLocation
   model?: string
+  codeModel?: string
   routerModel?: string
   ollamaUrl?: string
   userName?: string
@@ -68,6 +70,7 @@ export function loadConfig(): NullConfig {
       openWeatherApiKey: parsed.openWeatherApiKey,
       cachedLocation: parsed.cachedLocation,
       model: parsed.model,
+      codeModel: parsed.codeModel,
       routerModel: parsed.routerModel,
       ollamaUrl: parsed.ollamaUrl,
       userName: parsed.userName,
@@ -94,6 +97,18 @@ export function setAccentColor(color: AccentColor): void {
 export function setModel(model: string): void {
   const config = loadConfig()
   config.model = model
+  saveConfig(config)
+}
+
+export function setCodeModel(model: string): void {
+  const config = loadConfig()
+  config.codeModel = model
+  saveConfig(config)
+}
+
+export function setRouterModel(model: string): void {
+  const config = loadConfig()
+  config.routerModel = model
   saveConfig(config)
 }
 

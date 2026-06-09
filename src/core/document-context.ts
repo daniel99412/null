@@ -239,21 +239,10 @@ export function buildDocumentContextMessage(parts: DocumentPart[]): string {
 }
 
 export function buildDocumentResponseInstruction(userQuestion: string): string {
-  if (isSpanish(userQuestion)) {
-    return [
-      'Responde en español.',
-      'Usa el contexto de archivos locales adjuntos de arriba como fuente principal.',
-      'No digas que no puedes leer PDFs, archivos o documentos locales; ya fueron leídos y convertidos a texto.',
-      'Solo menciona errores de lectura si el bloque del archivo dice explícitamente "[Local file context error]".',
-      'Si el archivo dice "Read status: OK", el texto extraído es válido aunque sea corto.',
-      'Si el usuario pregunta por una línea específica, responde usando exactamente la línea numerada "N | texto".',
-      'Si el fragmento mostrado no alcanza para responder, dilo sin inventar contenido fuera del fragmento.',
-      'Si el usuario pregunta de qué trata, resume el tema central y los puntos importantes.',
-    ].join(' ')
-  }
-
   return [
-    'Respond in English.',
+    isSpanish(userQuestion)
+      ? 'Reply in Spanish because the user wrote in Spanish.'
+      : 'Reply in the same language the user used.',
     'Use the attached local file context above as the primary source.',
     'Do not say you cannot read PDFs, files, or local documents; they have already been read and converted to text.',
     'Only mention read errors if the file block explicitly says "[Local file context error]".',
