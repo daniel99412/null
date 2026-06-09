@@ -739,27 +739,27 @@ export function buildSportsCommentaryPrompt(
   const priorFinals = sortedFinals.filter((g) => new Date(g.date) < recentCutoff)
 
   const fmtGame = (g: ESPNGame): string => {
-    const date = new Date(g.date).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
+    const date = new Date(g.date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
     const phase = g.phase ? ` [${g.phase}]` : ''
     const note = g.note ? ` — ${g.note}` : ''
     const winner = g.home.winner ? g.home.team : g.away.winner ? g.away.team : null
     const result = winner
-      ? `${g.home.team} ${g.home.score}-${g.away.score} ${g.away.team} (ganó ${winner})`
+      ? `${g.home.team} ${g.home.score}-${g.away.score} ${g.away.team} (${winner} won)`
       : `${g.home.team} ${g.home.score}-${g.away.score} ${g.away.team}`
     return `• ${result}${phase}${note} — ${date}`
   }
 
   const fmtScheduled = (g: ESPNGame): string => {
     const date = new Date(g.date)
-    const dateStr = date.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
-    const timeStr = date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz })
+    const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz })
+    const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: tz })
     const phase = g.phase ? ` [${g.phase}]` : ''
     return `• ${g.home.team} vs ${g.away.team}${phase} — ${dateStr} ${timeStr}`
   }
 
   const parts: string[] = [
-    `Liga: ${scoreboard.league}${scoreboard.season ? ` — ${scoreboard.season}` : ''}`,
-    `Fase actual: ${scoreboard.seasonPhase ?? 'desconocida'}`,
+    `League: ${scoreboard.league}${scoreboard.season ? ` — ${scoreboard.season}` : ''}`,
+    `Current phase: ${scoreboard.seasonPhase ?? 'unknown'}`,
     '',
   ]
 
@@ -769,19 +769,19 @@ export function buildSportsCommentaryPrompt(
   }
 
   if (recentFinals.length > 0) {
-    parts.push('=== RESULTADOS MÁS RECIENTES (última jornada) ===')
+    parts.push('=== MOST RECENT RESULTS (last matchday) ===')
     recentFinals.forEach((g) => parts.push(fmtGame(g)))
     parts.push('')
   }
 
   if (priorFinals.length > 0) {
-    parts.push('=== CONTEXTO — resultados anteriores ===')
+    parts.push('=== CONTEXT — previous results ===')
     priorFinals.forEach((g) => parts.push(fmtGame(g)))
     parts.push('')
   }
 
   if (scheduled.length > 0) {
-    parts.push('=== PRÓXIMOS PARTIDOS ===')
+    parts.push('=== UPCOMING MATCHES ===')
     scheduled.forEach((g) => parts.push(fmtScheduled(g)))
     parts.push('')
   }
@@ -789,20 +789,20 @@ export function buildSportsCommentaryPrompt(
   const hasRecent = recentFinals.length > 0
   const hasNext = scheduled.length > 0
 
-  const userInstruction = `Pregunta del usuario: "${userQuery}"
+  const userInstruction = `User question: "${userQuery}"
 
-Escribe 2-4 líneas de comentario deportivo. Idioma: español.
+Write 2-4 lines of sports commentary in English.
 
-REGLAS — síguelas al pie de la letra:
-1. Enfócate en los RESULTADOS MÁS RECIENTES (sección de arriba)
-2. Puedes mencionar el contexto anterior brevemente (quién avanzó de cuartos, etc.)
-3. Si hay próximos partidos, menciona cuál es el siguiente
-4. NO inventes nada que no esté en los datos de arriba
-5. NO menciones campeones, relegados ni títulos si no aparecen explícitamente
-6. NO repitas los marcadores exactos (ya están en la tabla)
-7. Tono: analista deportivo casual, directo, en español
-${!hasRecent ? '8. No hay resultados recientes — describe solo los próximos partidos o di "Jornada en curso."' : ''}
-${!hasNext && !hasRecent ? '8. Sin datos suficientes → responde solo: "Sin información disponible para esta jornada."' : ''}`
+RULES — follow strictly:
+1. Focus on the MOST RECENT RESULTS (section above)
+2. You may briefly mention prior context (who advanced from quarterfinals, etc.)
+3. If there are upcoming matches, mention the next one
+4. Do NOT invent anything not in the data above
+5. Do NOT mention champions, relegations, or titles unless explicitly shown
+6. Do NOT repeat exact scores (they're already in the table)
+7. Tone: casual sports analyst, direct
+${!hasRecent ? '8. No recent results — describe only upcoming matches or say "Matchday in progress."' : ''}
+${!hasNext && !hasRecent ? '8. Not enough data → respond only: "No information available for this matchday."' : ''}`
 
   return {
     systemPrompt: parts.join('\n'),
