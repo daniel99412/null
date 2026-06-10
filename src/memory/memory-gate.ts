@@ -4,9 +4,7 @@
 // worth extracting. Conservative by design: false negatives are OK (we miss
 // some memories), false positives are costly (trigger LLM extractor on noise).
 //
-// The gate is intentionally separate from the router's savePreference signals.
-// The router handles explicit "save this preference" intents (sports teams, leagues).
-// The gate handles broader personal info that should be stored silently.
+// The gate handles personal info that should be stored silently.
 
 import { debugLog } from '../utils/debug.js'
 

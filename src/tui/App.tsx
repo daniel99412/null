@@ -1,9 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { streamChat } from '../core/ollama.js'
-import { getCommentaryClient } from '../core/llm-client.js'
-import { buildSportsCommentaryPrompt } from '../tools/sports.js'
-import { buildPreferencesContext } from '../memory/preferences.js'
 import { useLoading } from './hooks/useLoading.js'
 import { useCursor } from './hooks/useCursor.js'
 import { Splash } from './components/Splash.js'
@@ -58,7 +55,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
   { id: 'theme', label: 'Theme', description: 'Change the accent color of the UI', shortcut: '' },
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
-  { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search, news, sports)', shortcut: '' },
+  { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search and news)', shortcut: '' },
   { id: 'tools', label: 'Tools', description: 'List all available tools', shortcut: '/' },
   { id: 'keybindings', label: 'Keybindings', description: 'Show available keyboard shortcuts', shortcut: 'ctrl+h' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
@@ -189,6 +186,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const [overlay, setOverlay] = useState<Overlay>('none')
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
   const [digestArticles, setDigestArticles] = useState<Array<{ position: number; title: string; url: string; source: string; category: string }>>([])
+  const [readerShortcutsActive, setReaderShortcutsActive] = useState(false)
   const [readingArticle, setReadingArticle] = useState<DigestArticle | null>(null)
   const [fileMatches, setFileMatches] = useState<FileEntry[]>([])
   const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
@@ -507,15 +505,30 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
-    // Number keys 0-9 open the corresponding article from the last news digest
-    if (!isLoading && /^[0-9]$/.test(char) && digestArticles.length > 0) {
+    if (!isLoading && digestArticles.length > 0 && input.length === 0 && (char === 'r' || char === 'R')) {
+      setReaderShortcutsActive(true)
+      return
+    }
+
+    if (!isLoading && readerShortcutsActive && key.escape) {
+      setReaderShortcutsActive(false)
+      return
+    }
+
+    // Reader selection is explicit: press r, then 1-9/0.
+    if (!isLoading && readerShortcutsActive && /^[0-9]$/.test(char) && digestArticles.length > 0) {
       const idx = char === '0' ? 9 : parseInt(char, 10) - 1
       const article = digestArticles[idx]
       if (article) {
+        setReaderShortcutsActive(false)
         setReadingArticle(article)
         setOverlay('article-reader')
         return
       }
+    }
+
+    if (!isLoading && readerShortcutsActive && char) {
+      setReaderShortcutsActive(false)
     }
 
     if (isLoading) return
@@ -681,8 +694,10 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           buffer.current = agentResult.directResponse
           if (agentResult.digestArticles && agentResult.digestArticles.length > 0) {
             setDigestArticles(agentResult.digestArticles)
+            setReaderShortcutsActive(false)
           } else {
             setDigestArticles([])
+            setReaderShortcutsActive(false)
           }
           return
         }
@@ -711,87 +726,6 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             return copy
           })
           buffer.current = reactResult.answer
-          return
-        }
-
-        // Sports query — show table immediately, then stream LLM commentary below
-        if (agentResult.tableOutput) {
-          // Step 1: render the table right away so the user sees data instantly
-          updateMessages((m) => {
-            const copy = [...m]
-            const last = copy[copy.length - 1]
-            if (last?.role === 'assistant') last.content = agentResult.tableOutput!
-            return copy
-          })
-
-          setStatusText('')
-
-          // Step 2: build commentary prompt
-          // For news intent, skip scoreboard commentary — use news context directly
-          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-          let commentMessages: { role: string; content: string }[]
-
-          if (agentResult.newsIntent) {
-            // News query: comment based on headlines, not the scoreboard
-            const newsContext = agentResult.searchContext ?? ''
-            commentMessages = [
-              ...(newsContext ? [{ role: 'system', content: newsContext }] : []),
-              {
-                role: 'user',
-                content: `${resolvedTxt}\n\nSummarize the most relevant team news in 2-4 lines. Use ONLY the headlines above. Do not invent anything. Reply in the same language the user used.`,
-              }]
-            } else if (agentResult.scoreboard) {
-              const prefsCtx = buildPreferencesContext() ?? undefined
-              const { systemPrompt, userInstruction } = buildSportsCommentaryPrompt(
-                agentResult.scoreboard,
-                resolvedTxt,
-              tz,
-              prefsCtx,
-            )
-            // Debug log
-            process.stderr.write(`[null-debug] === SPORTS COMMENTARY PROMPT (structured) ===\n`)
-            process.stderr.write(`[null-debug] System:\n${systemPrompt}\n`)
-            process.stderr.write(`[null-debug] User instruction:\n${userInstruction}\n`)
-            process.stderr.write(`[null-debug] === END PROMPT ===\n`)
-
-            commentMessages = [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userInstruction },
-            ]
-          } else {
-            // Fallback: no scoreboard, use raw context
-            const sportSystemContent = agentResult.searchContext ?? ''
-            commentMessages = [
-              ...(sportSystemContent ? [{ role: 'system', content: sportSystemContent }] : []),
-              {
-                role: 'user',
-                content: `${resolvedTxt}\n\nWrite 2-4 lines of sports commentary based ONLY on the data above. Do not invent anything. Reply in the same language the user used.`,
-              },
-            ]
-          }
-
-          const commentaryClient = getCommentaryClient()
-          let commentary = ''
-          await commentaryClient.streamChat(
-            commentMessages.map((m) => ({
-              role: m.role as 'system' | 'user' | 'assistant',
-              content: m.content,
-            })),
-            (tok) => {
-              commentary += tok
-              updateMessages((m) => {
-                const copy = [...m]
-                const last = copy[copy.length - 1]
-                if (last?.role === 'assistant') {
-                  last.content = `${agentResult.tableOutput!}\n\n${commentary}`
-                }
-                return copy
-              })
-            },
-            { temperature: 0.3 },
-          )
-
-          buffer.current = `${agentResult.tableOutput}\n\n${commentary}`
           return
         }
 
@@ -938,6 +872,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           hasMoreLines={hasMoreLines}
           scrollOffset={scrollOffset}
           digestCount={digestArticles.length}
+          readerShortcutsActive={readerShortcutsActive}
           dimmed={isModalOpen}
         />
       </Box>
@@ -1021,6 +956,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
                 onClose={() => {
                   setOverlay('none')
                   setReadingArticle(null)
+                  setReaderShortcutsActive(false)
                 }}
               />
             )}

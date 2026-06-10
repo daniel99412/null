@@ -209,15 +209,6 @@ export function getRouterClient(): LLMClient {
   return _routerClient
 }
 
-/**
- * Returns a client for short sports commentary — uses the same small model
- * as the router (qwen2.5:3b) which follows constrained prompts better than
- * the larger coder model.
- */
-export function getCommentaryClient(): LLMClient {
-  return getRouterClient()
-}
-
 /** Invalidate cached clients (call after config change). */
 export function resetClients(): void {
   _defaultClient = null

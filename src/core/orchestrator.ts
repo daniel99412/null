@@ -11,15 +11,11 @@ function mapDecisionToAgent(decision: RoutingDecision): string {
       return 'datetime'
     case 'getWeather':
       return 'weather'
-    case 'sportsQuery':
-      return 'sports'
     case 'webSearch':
       return 'web-search'
     case 'mexicoNewsDigest':
     case 'newsDigest':
       return 'news'
-    case 'savePreference':
-      return 'preferences'
     case 'none':
     default:
       return 'general'
@@ -77,9 +73,7 @@ export async function orchestrateQuery(
   debugLog(`Router decision: ${routerResult.decision} (source: ${routerResult.source}, confidence: ${routerResult.confidence})`)
   debugLog(`[orchestrator] selected agent: ${agentId}`)
 
-  if (routerResult.decision !== 'savePreference') {
-    getAgentRegistry().run('memory', query, context).catch(() => {/* silent */})
-  }
+  getAgentRegistry().run('memory', query, context).catch(() => {/* silent */})
 
   return runWithFallback(agentId, query, context)
 }

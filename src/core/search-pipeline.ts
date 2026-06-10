@@ -163,7 +163,7 @@ export function buildArticleContext(
     parts.push('Every card MUST include all three labeled fields: Titular, Resumen, Inclinación.')
     parts.push('Bad format: a card with only two unlabeled lines.')
     parts.push('Estimate political inclination only when the article itself is about politics, public policy, parties, elections, government, courts, war, diplomacy, police, or social conflict.')
-    parts.push('For sports, health, entertainment, technology, education, weather, or general service stories, write "no estimable".')
+    parts.push('For health, entertainment, technology, education, weather, or general service stories, write "no estimable".')
     parts.push('Do NOT claim this is verified by an external rating service.')
     parts.push('')
   }

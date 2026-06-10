@@ -3,7 +3,7 @@ import { getDb } from './database.js'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type MemoryType =
-  | 'preference'    // sports teams, leagues, sports — also covers legacy user_preferences
+  | 'preference'    // durable user preferences
   | 'tech_stack'    // typescript, react, docker, etc.
   | 'occupation'    // backend developer, freelancer, etc.
   | 'project'       // "working on a fintech app" — expires in 90d
@@ -78,19 +78,6 @@ export function normalizeValue(value: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // strip diacritics
     .replace(/\s+/g, ' ')
-}
-
-/**
- * Return all aliases of type 'preference' — used by router to build
- * a dynamic regex for sports-related queries (teams, leagues, sports).
- * Synchronous — reads from SQLite in-process, negligible latency.
- */
-export function getSportsAliases(): string[] {
-  const db = getDb()
-  const rows = db
-    .prepare("SELECT alias FROM memory_aliases WHERE type = 'preference'")
-    .all() as { alias: string }[]
-  return rows.map(r => r.alias)
 }
 
 /**

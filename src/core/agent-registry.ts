@@ -4,8 +4,6 @@ import { dateTimeAgent } from './agents/datetime.agent.js'
 import { generalAgent } from './agents/general.agent.js'
 import { memoryAgent } from './agents/memory.agent.js'
 import { newsAgent } from './agents/news.agent.js'
-import { preferencesAgent } from './agents/preferences.agent.js'
-import { sportsAgent } from './agents/sports.agent.js'
 import { weatherAgent } from './agents/weather.agent.js'
 import { webSearchAgent } from './agents/web-search.agent.js'
 
@@ -79,10 +77,8 @@ export function registerBuiltinAgents(): void {
 
   registry.register(dateTimeAgent)
   registry.register(weatherAgent)
-  registry.register(sportsAgent)
   registry.register(newsAgent)
   registry.register(webSearchAgent)
-  registry.register(preferencesAgent)
   registry.register(memoryAgent)
   registry.register(generalAgent)
   builtinsRegistered = true

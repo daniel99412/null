@@ -34,11 +34,15 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
 
   useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
     setStatus('loading')
     setContent('')
     setError(null)
 
-    fetchPageText(article.url, { maxChars: MAX_CONTENT_CHARS })
+    fetchPageText(article.url, {
+      maxChars: MAX_CONTENT_CHARS,
+      signal: controller.signal,
+    })
       .then((text) => {
         if (cancelled) return
         if (!text || text.length < 50) {
@@ -56,7 +60,10 @@ export function ArticleReader({ article, onClose }: ArticleReaderProps) {
         setStatus('error')
       })
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [article.url])
 
   // Wrap content to fit the available width.

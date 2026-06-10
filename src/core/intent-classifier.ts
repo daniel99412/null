@@ -6,7 +6,7 @@
  * in router.ts does not have enough confidence to act directly.
  *
  * Returns an array of ClassifiedIntent to handle mixed queries
- * (e.g. "scores + news about atlas" → two intents executed in parallel).
+ * (e.g. "news + factual background" → two intents executed in parallel).
  *
  * Cache: in-memory, keyed by sha1(last 4 messages + query), TTL 5 min.
  */
@@ -17,18 +17,16 @@ import { debugLog } from '../utils/debug.js'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
-export type IntentCategory = 'sports' | 'general_news' | 'science'
-
-export type SportsIntent = 'scores' | 'standings' | 'news'
+export type IntentCategory = 'general_news' | 'science'
 export type GeneralIntent = 'news' | 'factual' | 'conversation'
-export type IntentAction = SportsIntent | GeneralIntent
+export type IntentAction = GeneralIntent
 
 export interface ClassifiedIntent {
   category: IntentCategory
   intent: IntentAction
   /**
-   * Semantic anchor extracted by the CLLM — team name, league, topic, etc.
-   * Used to build precise search queries (e.g. "noticias atlas fc").
+   * Semantic anchor extracted by the CLLM — topic, person, place, etc.
+   * Used to build precise search queries.
    */
   anchor?: string
 }
@@ -77,28 +75,24 @@ function setCache(key: string, result: CLLMResult): void {
 const CLASSIFIER_SYSTEM_PROMPT = `You are a strict intent classifier. Analyze the user query (and prior conversation context if present) and classify it.
 
 Categories:
-- sports: anything about a sports team, league, athlete, match, tournament, transfer, ownership, signing, or sports business event
-- general_news: news about politics, economy, business (non-sports), culture, society, current events
+- general_news: news about politics, economy, business, culture, society, current events
 - science: science, technology, medicine, programming, math, history, geography, general knowledge
 
 Intents (within each category):
-- scores: match results, standings, fixtures, upcoming games (sports only)
-- standings: league table, classification (sports only)
-- news: recent news, events, transfers, ownership changes, signings, injuries (sports or general)
+- news: recent news or current events
 - factual: established facts, explanations, definitions — things that do not change frequently
 - conversation: greetings, opinions, jokes, casual chat
 
 Rules:
-- If a sports team or league is mentioned alongside any event (sale, transfer, injury, executive change), category = "sports", intent = "news"
-- If no sports entity is mentioned but the topic is clearly current events = "general_news"
-- For mixed queries (e.g. scores AND news about a team), return multiple intents
-- Extract the semantic anchor: team name, league name, or main topic of the query
+- If the topic is clearly current events = "general_news"
+- For mixed queries, return multiple intents
+- Extract the semantic anchor: main topic of the query
 - Maximum 2 intents per response
 
 Respond ONLY with valid JSON. No text before or after.
 {
   "intents": [
-    { "category": "sports|general_news|science", "intent": "scores|standings|news|factual|conversation", "anchor": "string or null" }
+    { "category": "general_news|science", "intent": "news|factual|conversation", "anchor": "string or null" }
   ],
   "confidence": 0.0-1.0
 }`.trim()
@@ -159,8 +153,8 @@ interface RawCLLMResponse {
   confidence?: number
 }
 
-const VALID_CATEGORIES = new Set<string>(['sports', 'general_news', 'science'])
-const VALID_INTENTS = new Set<string>(['scores', 'standings', 'news', 'factual', 'conversation'])
+const VALID_CATEGORIES = new Set<string>(['general_news', 'science'])
+const VALID_INTENTS = new Set<string>(['news', 'factual', 'conversation'])
 
 function parse(raw: string, elapsedMs: number): CLLMResult {
   try {

@@ -9,7 +9,7 @@ const CODE_PATTERNS: RegExp[] = [
 ]
 
 const NON_CODE_PATTERNS: RegExp[] = [
-  /\b(clima|weather|temperatura|noticias?|news|marcador|resultado|standings|tabla|hora|fecha)\b/i,
+  /\b(clima|weather|temperatura|noticias?|news|hora|fecha)\b/i,
 ]
 
 export function isCodeQuery(text: string): boolean {

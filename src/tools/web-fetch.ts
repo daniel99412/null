@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -168,16 +168,57 @@ async function fetchViaCurlCffi(
     path.dirname(fileURLToPath(import.meta.url)),
     '../../scripts/fetch-via-curl-cffi.py',
   )
-  try {
-    const output = execSync(
-      `python3 "${scriptPath}" "${url.replace(/"/g, '\\"')}"`,
-      { timeout: 20000, maxBuffer: 1024 * 1024 },
-    ).toString()
-    if (!output || output.length < 100) return ''
-    return extractText(output, maxChars)
-  } catch {
-    return ''
-  }
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve('')
+      return
+    }
+
+    const child = spawn('python3', [scriptPath, url], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const chunks: Buffer[] = []
+    let settled = false
+
+    const finish = (value: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+      resolve(value)
+    }
+
+    const onAbort = () => {
+      child.kill('SIGTERM')
+      finish('')
+    }
+
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM')
+      finish('')
+    }, 20000)
+
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      chunks.push(chunk)
+      const total = chunks.reduce((sum, c) => sum + c.length, 0)
+      if (total > 1024 * 1024) {
+        child.kill('SIGTERM')
+        finish('')
+      }
+    })
+
+    child.on('error', () => finish(''))
+    child.on('close', (code) => {
+      if (code !== 0) {
+        finish('')
+        return
+      }
+      const output = Buffer.concat(chunks).toString()
+      finish(output && output.length >= 100 ? extractText(output, maxChars) : '')
+    })
+  })
 }
 
 /**
@@ -597,7 +638,7 @@ const BOILERPLATE_LINE_PATTERNS: RegExp[] = [
   // Navigation / comment CTAs
   /^ir a los comentarios/i,
   // Single-word nav items (common on Spanish news sites)
-  /^(internacional|m[eé]xico|opini[oó]n|econom[ií]a|ciencia|cultura|deportes|gente|tecnolog[ií]a|espect[aá]culos|pol[ií]tica|sociedad|salud|educaci[oó]n|justicia|seguridad|migraci[oó]n)$/i,
+  /^(internacional|m[eé]xico|opini[oó]n|econom[ií]a|ciencia|cultura|gente|tecnolog[ií]a|espect[aá]culos|pol[ií]tica|sociedad|salud|educaci[oó]n|justicia|seguridad|migraci[oó]n)$/i,
   // Author / metadata shortlines
   /^ver biograf[ií]a/i,
   /^ver todas las noticias de/i,

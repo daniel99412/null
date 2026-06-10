@@ -1,5 +1,4 @@
 import type { ChatMessage } from './llm-client.js'
-import type { SportsScoreboard } from '../tools/sports.js'
 
 export type AgentMode = 'deterministic' | 'llm' | 'react'
 
@@ -36,11 +35,6 @@ export interface AgentResponse {
   statusMessage: string | null
   useReAct?: boolean
   directResponse?: string
-  tableOutput?: string
-  seasonPhase?: string
-  scoreboard?: SportsScoreboard
-  newsIntent?: boolean
-  teamNewsCount?: number
   digestArticles?: Array<{
     position: number
     title: string

@@ -3,7 +3,6 @@ import type { SearchContext } from '../tools/web-search.js'
 import { fetchPageText } from '../tools/web-fetch.js'
 import { getLocation, type GeoLocation } from '../tools/gps.js'
 import { getCurrentWeather, getWeatherByCity, type WeatherData } from '../tools/weather.js'
-import { buildSportsContext } from '../tools/sports.js'
 import { getNewsTopics, upsertNewsTopic, deleteNewsTopic } from '../memory/database.js'
 import { upsertMemory, deleteMemory } from '../memory/memory-store.js'
 import { searchDocsHybrid, buildDocContext } from '../docs/retriever.js'
@@ -87,7 +86,7 @@ export const toolDefinitions = [
 
   {
     name: 'web_search',
-    description: 'Search the web for current information. Use for recent events, news, sports transfers, prices, or any query that needs up-to-date data.',
+    description: 'Search the web for current information. Use for recent events, news, prices, or any query that needs up-to-date data.',
     showInSlashMenu: false,
     inputSchema: {
       type: 'object' as const,
@@ -117,29 +116,6 @@ export const toolDefinitions = [
       required: ['url'],
     },
     handler: async (args) => fetchPageText(args.url as string),
-  },
-
-  {
-    name: 'sports_query',
-    description: 'Get sports scores, standings, fixtures, and news for leagues and teams. Supports soccer, football, basketball, baseball, hockey, and more.',
-    aliases: ['sports', 'deportes', 'futbol', 'fútbol'],
-    showInSlashMenu: true,
-    slashArgHint: '<query>',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Sports query — team name, league, or what you want to know (scores, standings, news)',
-        },
-      },
-      required: ['query'],
-    },
-    handler: async (args) => {
-      const result = await buildSportsContext(args.query as string)
-      if (!result) return 'No se encontraron resultados deportivos para esa consulta.'
-      return result.llmContext
-    },
   },
 
   {

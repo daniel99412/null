@@ -12,6 +12,7 @@ interface FooterProps {
   scrollOffset: number;
   statusText?: string;
   digestCount?: number;
+  readerShortcutsActive?: boolean;
   dimmed?: boolean;
 }
 
@@ -24,6 +25,7 @@ export function Footer({
   scrollOffset,
   statusText = "",
   digestCount = 0,
+  readerShortcutsActive = false,
   dimmed = false,
 }: FooterProps) {
   const { accent } = useTheme();
@@ -44,7 +46,7 @@ export function Footer({
             {scrollOffset} lines above{" "}
           </Text>
         ) : null}
-        {digestCount > 0 && !isLoading ? (
+        {digestCount > 0 && !isLoading && readerShortcutsActive ? (
           <>
             <Text color="gray" dimColor={dimmed}>
               {digestCount > 9 ? "0-9" : "1-9"}
@@ -52,6 +54,24 @@ export function Footer({
             <Text color="white" dimColor={dimmed}>
               {" "}
               leer{" "}
+            </Text>
+            <Text color="gray" dimColor={dimmed}>
+              esc
+            </Text>
+            <Text color="white" dimColor={dimmed}>
+              {" "}
+              cerrar reader{" "}
+            </Text>
+          </>
+        ) : null}
+        {digestCount > 0 && !isLoading && !readerShortcutsActive ? (
+          <>
+            <Text color="gray" dimColor={dimmed}>
+              r
+            </Text>
+            <Text color="white" dimColor={dimmed}>
+              {" "}
+              reader{" "}
             </Text>
           </>
         ) : null}

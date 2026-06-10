@@ -347,7 +347,6 @@ const CATEGORY_PATTERNS: [RegExp, string][] = [
   [/\b(migraci[oó]n|migrantes?|frontera|deportaci[oó]n|asilo|eeuu|estados unidos|trump|biden|harris|washington)\b/i, 'Migración'],
   [/\b(salud|covid|epidemia|vacuna|hospital|imss|issste|medicamentos?|diabetes|c[aá]ncer)\b/i, 'Salud'],
   [/\b(educaci[oó]n|escuela|universidad|unam|ipn|sep|maestros?|estudiantes?)\b/i, 'Educación'],
-  [/\b(mundial|deporte|f[uú]tbol|liga|copa|olimpiadas?|atletas?)\b/i, 'Deportes'],
   [/\b(tecnolog[ií]a|inteligencia artificial|ia|ai|startup|digital|internet|redes sociales)\b/i, 'Tecnología'],
   [/\b(medio ambiente|clima|hurac[aá]n|terremoto|sismo|desastre|agua|sequía)\b/i, 'Medio Ambiente'],
 ]

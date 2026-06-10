@@ -1,10 +1,9 @@
 import { normalizeQuery } from '../utils/normalize.js'
 import { debugLog } from '../utils/debug.js'
-import { getSportsAliases } from '../memory/memory-store.js'
 import { classifyIntent } from './intent-classifier.js'
 import type { CLLMResult } from './intent-classifier.js'
 
-export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'sportsQuery' | 'savePreference' | 'mexicoNewsDigest' | 'newsDigest' | 'none'
+export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'mexicoNewsDigest' | 'newsDigest' | 'none'
 
 export interface RouterResult {
   decision: RoutingDecision
@@ -79,49 +78,6 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(qu[eé]\s+temperatura)(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'what temperature' },
   { pattern: /(?:^|\s)(va\s+a\s+llover|va\s+a\s+hacer\s+(calor|fr[íi]o))(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'will it rain/be hot' },
 
-  // ── SPORTSQUERY ───────────────────────────────────────────────────────────
-  { pattern: /\b(resultados?|marcador(es)?|scores?)\b/i, intent: 'sportsQuery', weight: 10, description: 'scores/results' },
-  { pattern: /(?:^|\s)(últimos|ultimos)\b.*\b(partidos?|juegos?|encuentros?)\b/i, intent: 'sportsQuery', weight: 10, description: 'last matches' },
-  { pattern: /(?:^|\s)(cómo|como|cuánto|cuanto)\b.*(quedó|quedo|terminó|termino|ganó|gano)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 10, description: 'how did it end/who won' },
-  { pattern: /\b(tabla\s+de\s+posiciones|tabla\s+general|standings?|clasificaci[oó]n|posiciones)\b/i, intent: 'sportsQuery', weight: 10, description: 'standings' },
-  { pattern: /(?:^|\s)(próximos|proximos)\b.*\b(partidos?|juegos?|encuentros?)\b/i, intent: 'sportsQuery', weight: 10, description: 'upcoming matches' },
-  { pattern: /\b(calend(a|e)rio|fixture|jornada\s+\d+|jornada\s+siguiente|jornada\s+pasada|ultima\s+jornada|jornada\s+anterior)\b/i, intent: 'sportsQuery', weight: 10, description: 'matchday/fixture' },
-  { pattern: /(?:^|\s)(última\s+jornada)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 10, description: 'last matchday' },
-  { pattern: /\bjornada\b.*(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue)/i, intent: 'sportsQuery', weight: 10, description: 'jornada + league' },
-  { pattern: /(liga\s*mx|ligamx|la\s+liga|laliga|premier|bundesliga|serie\s+a|champions|ligue).*\bjornada\b/i, intent: 'sportsQuery', weight: 10, description: 'league + jornada' },
-  { pattern: /\bjornada\b.*(estuvo|fue|quedó|quedo|terminó|termino|salió|salio)/i, intent: 'sportsQuery', weight: 10, description: 'jornada result' },
-  { pattern: /(?:como|cómo|qué tal|que tal)\b.*\bjornada\b/i, intent: 'sportsQuery', weight: 10, description: 'how was the jornada' },
-  { pattern: /\b(liga\s*mx|ligamx|premier\s+league|bundesliga|serie\s+a|la\s+liga|laliga|ligue\s+1|champions\s+league)\b.*\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b/i, intent: 'sportsQuery', weight: 10, description: 'league + time keyword' },
-  { pattern: /\b(hoy|ayer|semana|jornada|partido|resultado|marcador)\b.*\b(liga\s*mx|ligamx|premier|bundesliga|serie\s+a|la\s+liga|laliga|champions)\b/i, intent: 'sportsQuery', weight: 10, description: 'time keyword + league' },
-  { pattern: /(?:^|\s)(juega|juegan|jugaron)(?:\s|$|[?,.])/i, intent: 'sportsQuery', weight: 8, description: 'plays/played' },
-  { pattern: /(?:^|\s)(jugó|jugara|jugará)/i, intent: 'sportsQuery', weight: 8, description: 'played/will play' },
-  { pattern: /\b(partido\s+de|juego\s+de|encuentro\s+de)\b.*\b(hoy|ayer|mañana|esta semana|semana pasada)\b/i, intent: 'sportsQuery', weight: 10, description: 'match of + time' },
-  // "noticias de mi equipo / club / deporte" → webSearch (needs real articles)
-  { pattern: /\bnoticias?\b.*\b(mi\s+equipo|mi\s+club|f[uú]tbol|futbol|deporte|liga|team|sport)\b/i, intent: 'webSearch', weight: 15, description: 'news about my team/sport' },
-  { pattern: /\b(mi\s+equipo|mi\s+club)\b.*\bnoticias?\b/i, intent: 'webSearch', weight: 15, description: 'my team news' },
-  // club business events (transfers, ownership, signings) → always webSearch
-  { pattern: /\b(venta|compra|vende|compra|vendido|comprado|adquiri[oó]|adquisici[oó]n)\b.*\b(equipo|club|equipo|atlas|chivas|tigres|pumas|america|monterrey|cruz\s*azul|pachuca|toluca|santos|leon|guadalajara)\b/i, intent: 'webSearch', weight: 18, description: 'club sale/acquisition' },
-  { pattern: /\b(equipo|club|atlas|chivas|tigres|pumas|america|monterrey|cruz\s*azul|pachuca|toluca|santos|leon|guadalajara)\b.*\b(venta|compra|vendido|comprado|adquiri[oó]|adquisici[oó]n|dueño|propietario|inversi[oó]n)\b/i, intent: 'webSearch', weight: 18, description: 'club ownership/acquisition' },
-  { pattern: /\b(fichaje|fichajes|transfer(encia)?|contrat[oó]|renovaci[oó]n|refuerzo|refuerzos|alta|baja)\b/i, intent: 'webSearch', weight: 14, description: 'transfers/contracts' },
-  { pattern: /\b(dueño|propietario|directivo|presidente|director\s+deportivo|inversionista)\b.*\b(equipo|club|f[uú]tbol|futbol)\b/i, intent: 'webSearch', weight: 14, description: 'club ownership/executive' },
-  // "cómo va / cómo está mi equipo"
-  { pattern: /\b(c[oó]mo\s+(va|est[aá]|le\s+fue|qued[oó]))\b.*\bmi\s+(equipo|club)\b/i, intent: 'sportsQuery', weight: 12, description: 'how is my team doing' },
-  { pattern: /\bmi\s+(equipo|club)\b.*\b(c[oó]mo\s+(va|est[aá]|le\s+fue|qued[oó]))\b/i, intent: 'sportsQuery', weight: 12, description: 'my team how is it doing' },
-  // "qué pasó con / qué hay de mi equipo"
-  { pattern: /\b(qu[eé]\s+(pas[oó]|hay|fue|hizo|dijo))\b.*\bmi\s+(equipo|club)\b/i, intent: 'sportsQuery', weight: 12, description: 'what happened with my team' },
-
-  // ── SAVEPREFERENCE — user stating personal sports preference ──────────────
-  { pattern: /\bmi equipo(s)? (favorito|fav|preferido)(s)? (es|son|de f[uú]tbol (es|son))\b/i, intent: 'savePreference', weight: 20, description: 'my favorite team' },
-  { pattern: /\bmi(s)? (club|equipos?|ligas?|deportes?)(s)? (favorito|preferido|fav)(s)? (es|son)\b/i, intent: 'savePreference', weight: 20, description: 'my favorite club/league/sport' },
-  { pattern: /\b(soy del|soy de|le voy al?|le voy a(l)?) \b/i, intent: 'savePreference', weight: 15, description: 'I support team' },
-  { pattern: /\b(soy|soy un) (aficionado|fan|seguidor) (de(l)?|al?)\b/i, intent: 'savePreference', weight: 15, description: 'I am a fan of' },
-  { pattern: /\bsigo (al?|a|la|las|el|los)\b/i, intent: 'savePreference', weight: 15, description: 'I follow (sigo)' },
-  { pattern: /\btambi[eé]n sigo\b/i, intent: 'savePreference', weight: 15, description: 'también sigo' },
-  { pattern: /\bme gusta(n)? (el|los|la|las)\b/i, intent: 'savePreference', weight: 14, description: 'me gusta(n)' },
-  { pattern: /\bmy (favorite|favourite) (team|club|sport|league) (is|are)\b/i, intent: 'savePreference', weight: 20, description: 'my favorite team (EN)' },
-  { pattern: /\bI('m| am) a(n?)? .+ fan\b/i, intent: 'savePreference', weight: 15, description: 'I am a fan (EN)' },
-  { pattern: /\bI (support|follow|root for)\b/i, intent: 'savePreference', weight: 12, description: 'I support/follow (EN)' },
-
   // ── NEWSDIGEST — topic-specific news queries ────────────────────────────
   { pattern: /\b(dame|d[aá]me)\b.*\b(las?\s+)?noticias?\b/i, intent: 'newsDigest', weight: 20, description: 'dame las noticias' },
   { pattern: /\b(me\s+)?(das?|puedes? darme?|puedes?\s+darme|me\s+das)\b.*\b(las?\s+)?noticias?\b/i, intent: 'newsDigest', weight: 20, description: 'me das las noticias' },
@@ -131,11 +87,11 @@ const SIGNALS: Signal[] = [
   { pattern: /\bnoticias?\b.*\b(resumen|digest)\b/i, intent: 'newsDigest', weight: 18, description: 'noticias resumen' },
   { pattern: /\b(últimas?|últimos?)\b.*\bnoticias?\b/i, intent: 'newsDigest', weight: 16, description: 'últimas noticias' },
   { pattern: /\bnoticias?\b.*\b(últimas?|recientes?|importantes?)\b/i, intent: 'newsDigest', weight: 16, description: 'noticias importantes' },
-  { pattern: /\bnoticias?\b.*\b(de\s+)?(m[eé]xico|internacional|finanzas?|tecnolog[ií]a|ciencia|deportes?|salud)\b/i, intent: 'newsDigest', weight: 16, description: 'noticias de un topic' },
+  { pattern: /\bnoticias?\b.*\b(de\s+)?(m[eé]xico|internacional|finanzas?|tecnolog[ií]a|ciencia|salud)\b/i, intent: 'newsDigest', weight: 16, description: 'noticias de un topic' },
   { pattern: /\b(ponme|p[oó]nme)\b.*\bal\b.*\b(d[ií]a|noticias?)\b/i, intent: 'newsDigest', weight: 14, description: 'ponme al día' },
   { pattern: /\bqu[eé]\s+(se\s+)?(sabe|dice)\s+(hoy|del?\s+(d[ií]a|mundo))\b/i, intent: 'newsDigest', weight: 14, description: 'que se sabe hoy' },
   { pattern: /\b(noticias?|novedades?)\s+(de\s+)?(sobre\s+)?\w{3,}/i, intent: 'newsDigest', weight: 12, description: 'noticias de [algo] generico' },
-  { pattern: /(?:^|\s)(qu[eé])\s+(pas[oó]|hay|hubo)\s+(en|de)\s+(tecnolog[ií]a|finanzas?|ciencia|salud|deportes?|internacional|econom[ií]a|negocios|pol[ií]tica|seguridad|educaci[oó]n|cultura)\b/i, intent: 'newsDigest', weight: 18, description: 'que paso en [topic]' },
+  { pattern: /(?:^|\s)(qu[eé])\s+(pas[oó]|hay|hubo)\s+(en|de)\s+(tecnolog[ií]a|finanzas?|ciencia|salud|internacional|econom[ií]a|negocios|pol[ií]tica|seguridad|educaci[oó]n|cultura)\b/i, intent: 'newsDigest', weight: 18, description: 'que paso en [topic]' },
 
   // ── WEBSEARCH — recency / news ────────────────────────────────────────────
   { pattern: /\b(20[2-9][4-9]|20[3-9]\d)\b/, intent: 'webSearch', weight: 10, description: 'year post-cutoff' },
@@ -147,46 +103,11 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(hoy|today|ahora|now|actual|current|últim[oa]s?|latest|reciente|recent|este año|this year|esta semana|this week|ayer|yesterday)(?:\s|$|[?,.])/i, intent: 'webSearch', weight: 3, description: 'recency indicator' },
 ]
 
-// Dynamic signal: "noticias" + known sports alias (from DB) → webSearch weight 18
-// News about a specific team needs real web articles, not sports scoreboard.
-// Built lazily on first use — DB may not be initialized at module load time.
-let _teamNewsSignal: Signal | null = null
-
-function isGenericMexicoNewsQuery(query: string): boolean {
-  return /\bnoticias?\b/i.test(query)
-    && /\bm[eé]xico\b/i.test(query)
-    && !/\b(selecci[oó]n|tri|f[uú]tbol|futbol|deporte|liga|partido|juego|marcador|resultado|fichaje|transferencia|jugador|t[eé]cnico)\b/i.test(query)
-}
-
-function getTeamNewsSignal(): Signal {
-  if (_teamNewsSignal) return _teamNewsSignal
-  const aliases = getSportsAliases()
-  if (aliases.length === 0) {
-    _teamNewsSignal = {
-      pattern: /$a/,
-      intent: 'webSearch',
-      weight: 0,
-      description: 'empty sports aliases',
-    }
-    return _teamNewsSignal
-  }
-  const escaped = aliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
-  _teamNewsSignal = {
-    pattern: new RegExp(`(?:noticias?|news).*\\b(${escaped})\\b|\\b(${escaped})\\b.*(?:noticias?|news)`, 'i'),
-    intent: 'webSearch',
-    weight: 18,
-    description: 'news about known sports alias (DB) → webSearch',
-  }
-  return _teamNewsSignal
-}
-
 function scoreQuery(query: string): Record<RoutingDecision, number> {
   const scores: Record<RoutingDecision, number> = {
     webSearch: 0,
     getDateTime: 0,
     getWeather: 0,
-    sportsQuery: 0,
-    savePreference: 0,
     mexicoNewsDigest: 0,
     newsDigest: 0,
     none: 0,
@@ -196,20 +117,6 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
     if (signal.pattern.test(query)) {
       scores[signal.intent] += signal.weight
       debugLog(`[router] signal match: "${signal.description}" → ${signal.intent} +${signal.weight}`)
-    }
-  }
-
-  // Dynamic team-news signal (built from DB aliases, lazy).
-  // Only load aliases for news-like queries; most routing should not touch SQLite.
-  if (/\b(noticias?|news)\b/i.test(query) && !isGenericMexicoNewsQuery(query)) {
-    try {
-      const teamNewsSignal = getTeamNewsSignal()
-      if (teamNewsSignal.pattern.test(query)) {
-        scores[teamNewsSignal.intent] += teamNewsSignal.weight
-        debugLog(`[router] signal match: "${teamNewsSignal.description}" → ${teamNewsSignal.intent} +${teamNewsSignal.weight}`)
-      }
-    } catch (err) {
-      debugLog(`[router] skipped dynamic team-news aliases: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -288,12 +195,6 @@ function mapCLLMToDecision(cllm: CLLMResult): RoutingDecision {
   if (!primary) return 'webSearch'
 
   const { category, intent } = primary
-
-  if (category === 'sports') {
-    // Scores/standings → sports data; news/transfers/ownership → webSearch
-    if (intent === 'scores' || intent === 'standings') return 'sportsQuery'
-    return 'webSearch'
-  }
 
   if (category === 'general_news') {
     if (intent === 'factual' || intent === 'conversation') return 'none'
