@@ -69,7 +69,7 @@ async function stepOllama(): Promise<{ available: boolean; models: string[] }> {
     print(dim(`  Installed models: ${health.ollama.models.join(', ')}`))
   } else {
     print(yellow('  No models installed yet.'))
-    print(dim('  Tip: ollama pull qwen2.5:7b'))
+    print(dim(`  Tip: ollama pull ${DEFAULT_MODEL}`))
   }
 
   return { available: true, models: health.ollama.models }
@@ -86,8 +86,8 @@ async function stepModel(rl: readline.Interface, models: string[]): Promise<stri
     return DEFAULT_MODEL
   }
 
-  const defaultChoice = models.includes('qwen2.5:7b')
-    ? 'qwen2.5:7b'
+  const defaultChoice = models.includes(DEFAULT_MODEL)
+    ? DEFAULT_MODEL
     : models[0]
 
   print(dim(`  Current: ${currentModel}`))

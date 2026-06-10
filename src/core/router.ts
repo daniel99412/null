@@ -140,6 +140,7 @@ const SIGNALS: Signal[] = [
   // ── WEBSEARCH — recency / news ────────────────────────────────────────────
   { pattern: /\b(20[2-9][4-9]|20[3-9]\d)\b/, intent: 'webSearch', weight: 10, description: 'year post-cutoff' },
   { pattern: /\b(hoy|today|ahorita|ahora|right now)\b.*\b(precio|price|clima|weather|dólar|dollar)\b/i, intent: 'webSearch', weight: 10, description: 'today + price/rate' },
+  { pattern: /(últimas?|ultimas?|latest|recientes?|recent).*(noticias?|news)|(noticias?|news).*(últimas?|ultimas?|latest|recientes?|recent)/i, intent: 'webSearch', weight: 4, description: 'latest/recent news freshness' },
   { pattern: /\b(últimas?|latest|reciente|recent|noticias?|news|breaking)\b/i, intent: 'webSearch', weight: 8, description: 'news/latest' },
   { pattern: /\b(precio|cotización|exchange rate)\b.*\b(dólar|euro|bitcoin|crypto)\b/i, intent: 'webSearch', weight: 10, description: 'price of currency/crypto' },
   // Recency adds minor score to webSearch
@@ -147,9 +148,16 @@ const SIGNALS: Signal[] = [
 ]
 
 // Dynamic signal: "noticias" + known sports alias (from DB) → webSearch weight 18
-// News about a specific team needs real web articles, not ESPN scoreboard.
+// News about a specific team needs real web articles, not sports scoreboard.
 // Built lazily on first use — DB may not be initialized at module load time.
 let _teamNewsSignal: Signal | null = null
+
+function isGenericMexicoNewsQuery(query: string): boolean {
+  return /\bnoticias?\b/i.test(query)
+    && /\bm[eé]xico\b/i.test(query)
+    && !/\b(selecci[oó]n|tri|f[uú]tbol|futbol|deporte|liga|partido|juego|marcador|resultado|fichaje|transferencia|jugador|t[eé]cnico)\b/i.test(query)
+}
+
 function getTeamNewsSignal(): Signal {
   if (_teamNewsSignal) return _teamNewsSignal
   const aliases = getSportsAliases()
@@ -193,7 +201,7 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
 
   // Dynamic team-news signal (built from DB aliases, lazy).
   // Only load aliases for news-like queries; most routing should not touch SQLite.
-  if (/\b(noticias?|news)\b/i.test(query)) {
+  if (/\b(noticias?|news)\b/i.test(query) && !isGenericMexicoNewsQuery(query)) {
     try {
       const teamNewsSignal = getTeamNewsSignal()
       if (teamNewsSignal.pattern.test(query)) {
@@ -282,7 +290,7 @@ function mapCLLMToDecision(cllm: CLLMResult): RoutingDecision {
   const { category, intent } = primary
 
   if (category === 'sports') {
-    // Scores/standings → ESPN; news/transfers/ownership → webSearch
+    // Scores/standings → sports data; news/transfers/ownership → webSearch
     if (intent === 'scores' || intent === 'standings') return 'sportsQuery'
     return 'webSearch'
   }

@@ -7,6 +7,7 @@
  *   - getDateTime → date/time questions
  *   - sportsQuery → scores, standings, schedules, jornadas
  *   - webSearch   → recency-dependent or unknown queries
+ *   - newsDigest  → configured/general news digests
  *
  * The router calls Ollama as a fallback only when no heuristic matches,
  * so these tests mock the fetch to prevent network calls.
@@ -159,15 +160,32 @@ describe('router → webSearch (heuristic)', () => {
     // Prices / markets
     'precio del dólar hoy',
     'cotización del bitcoin ahora',
-    // Latest news
-    'últimas noticias de tecnología',
+    // English latest news falls back to web search
     'latest news about climate change',
-    'noticias recientes',
   ]
 
   for (const query of cases) {
     it(`"${query}"`, async () => {
       expect(await decision(query)).toBe('webSearch')
+    })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// NEWSDIGEST — formatted configured/general news digests
+// ---------------------------------------------------------------------------
+
+describe('router → newsDigest (heuristic)', () => {
+  const cases = [
+    'hola me das las noticias para mexico',
+    'últimas noticias de México',
+    'últimas noticias de tecnología',
+    'noticias recientes',
+  ]
+
+  for (const query of cases) {
+    it(`"${query}"`, async () => {
+      expect(await decision(query)).toBe('newsDigest')
     })
   }
 })

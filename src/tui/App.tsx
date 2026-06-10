@@ -1,8 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { streamChat } from '../core/ollama.js'
-import { getCommentaryClient, getDefaultClient } from '../core/llm-client.js'
-import { buildSportsCommentaryPrompt } from '../tools/espn.js'
+import { getCommentaryClient } from '../core/llm-client.js'
+import { buildSportsCommentaryPrompt } from '../tools/sports.js'
 import { buildPreferencesContext } from '../memory/preferences.js'
 import { useLoading } from './hooks/useLoading.js'
 import { useCursor } from './hooks/useCursor.js'
@@ -58,7 +58,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
   { id: 'theme', label: 'Theme', description: 'Change the accent color of the UI', shortcut: '' },
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
-  { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search, news, ESPN)', shortcut: '' },
+  { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search, news, sports)', shortcut: '' },
   { id: 'tools', label: 'Tools', description: 'List all available tools', shortcut: '/' },
   { id: 'keybindings', label: 'Keybindings', description: 'Show available keyboard shortcuts', shortcut: 'ctrl+h' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
@@ -204,8 +204,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     const name = config.userName
 
     const welcomePrompt = name
-      ? `Saluda cálidamente a ${name} y pregúntale cómo puedes ayudarle hoy. Responde en español. Máximo 2 líneas. No uses emojis.`
-      : `Saluda cálidamente al usuario y ofrécete a ayudar. Responde en español. Máximo 2 líneas. No uses emojis.`
+      ? `Warmly greet ${name} and ask how you can help today. Reply in Spanish because this is the app's default welcome language. Maximum 2 lines. Do not use emojis.`
+      : `Warmly greet the user and offer help. Reply in Spanish because this is the app's default welcome language. Maximum 2 lines. Do not use emojis.`
 
     let buffer = ''
     startLoading()
@@ -217,7 +217,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
         updateMessages([{ role: 'assistant', content: buffer }])
       },
       [{ role: 'user', content: welcomePrompt }],
-      'Eres Null, un asistente personal de IA amable y servicial. Respondes en español.',
+      'You are Null, a friendly and helpful personal AI assistant. Reply in the language requested by the user prompt.',
       { temperature: 0.7 },
     ).then(() => {
       stopLoading()
@@ -738,7 +738,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
               ...(newsContext ? [{ role: 'system', content: newsContext }] : []),
               {
                 role: 'user',
-                content: `${resolvedTxt}\n\nResume las noticias más relevantes del equipo en 2-4 líneas. Usa SOLO los titulares de arriba. No inventes nada. Responde en español.`,
+                content: `${resolvedTxt}\n\nSummarize the most relevant team news in 2-4 lines. Use ONLY the headlines above. Do not invent anything. Reply in the same language the user used.`,
               }]
             } else if (agentResult.scoreboard) {
               const prefsCtx = buildPreferencesContext() ?? undefined
@@ -765,7 +765,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
               ...(sportSystemContent ? [{ role: 'system', content: sportSystemContent }] : []),
               {
                 role: 'user',
-                content: `${resolvedTxt}\n\nEscribe 2-4 líneas de comentario deportivo basado SOLO en los datos anteriores. No inventes nada.`,
+                content: `${resolvedTxt}\n\nWrite 2-4 lines of sports commentary based ONLY on the data above. Do not invent anything. Reply in the same language the user used.`,
               },
             ]
           }

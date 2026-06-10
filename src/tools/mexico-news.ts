@@ -161,7 +161,7 @@ function wrapWithPrefix(text: string, prefix: string, maxWidth: number): string[
   return lines
 }
 
-function formatCard(story: NewsStory): string {
+function formatCard(story: NewsStory, displayKey: string): string {
   const bias = analyzeBias(story)
   const sourceList = story.sources.slice(0, 5).join(' · ')
   const extra = story.sources.length > 5 ? ` +${story.sources.length - 5}` : ''
@@ -178,7 +178,7 @@ function formatCard(story: NewsStory): string {
   const resumenLines = wrapWithPrefix(`Resumen: ${summary}`, '│ ', CONTENT_WIDTH)
 
   const lines: string[] = []
-  lines.push(`┌─ ${story.category} · ${sourceList}${extra}`)
+  lines.push(`┌─(${displayKey}) ${story.category} · ${sourceList}${extra}`)
   lines.push('│')
   for (const ln of titularLines) lines.push(ln)
   lines.push('│')
@@ -194,7 +194,7 @@ function formatCard(story: NewsStory): string {
   return lines.join('\n')
 }
 
-function formatDigest(stories: NewsStory[], fetchedAt: Date, topicName = 'México'): string {
+export function formatDigest(stories: NewsStory[], fetchedAt: Date, topicName = 'México'): string {
   const dateStr = fetchedAt.toLocaleString('es-MX', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -214,7 +214,9 @@ function formatDigest(stories: NewsStory[], fetchedAt: Date, topicName = 'Méxic
     return `${header}No se pudieron obtener noticias en este momento. Intenta de nuevo en unos minutos.`
   }
 
-  const cards = stories.map((s) => formatCard(s)).join('\n\n')
+  const cards = stories
+    .map((story, index) => formatCard(story, index === 9 ? '0' : String(index + 1)))
+    .join('\n\n')
 
   const footer = [
     '',
@@ -325,7 +327,7 @@ export async function buildTopicNewsDigest(topicName: string, query?: string): P
   const sourceIds: number[] = JSON.parse(topic.source_ids)
 
   // Bump DIGEST_FORMAT_VERSION when format changes to invalidate stale cache.
-  const DIGEST_FORMAT_VERSION = 'v8'
+  const DIGEST_FORMAT_VERSION = 'v10'
   const cacheKey = `${DIGEST_FORMAT_VERSION}:${topicName.toLowerCase().trim()}:${(query ?? '').toLowerCase().trim().slice(0, 40)}`
 
   // Check digest cache first

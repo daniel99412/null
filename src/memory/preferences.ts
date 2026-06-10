@@ -71,7 +71,7 @@ function escapeRegex(s: string): string {
 
 /**
  * Attempt to extract preference(s) from a natural language query.
- * Teams and leagues are resolved from espn_teams / espn_leagues DB tables.
+ * Teams and leagues are resolved from the sports catalog DB tables.
  * Sports are resolved from the local SPORT_CANONICAL map (stable, no API dependency).
  */
 export function extractPreferencesFromQuery(query: string): ExtractedPreference[] {
@@ -84,7 +84,7 @@ export function extractPreferencesFromQuery(query: string): ExtractedPreference[
   const db = getDb()
   const results: ExtractedPreference[] = []
 
-  // ── Teams — query espn_teams table ──────────────────────────────────────
+  // ── Teams — query sports catalog table ──────────────────────────────────
   const teamRows = db
     .prepare('SELECT alias, canonical FROM espn_teams ORDER BY length(alias) DESC')
     .all() as { alias: string; canonical: string }[]
@@ -98,7 +98,7 @@ export function extractPreferencesFromQuery(query: string): ExtractedPreference[
     }
   }
 
-  // ── Leagues — query espn_leagues table ───────────────────────────────────
+  // ── Leagues — query sports catalog table ────────────────────────────────
   // Use a mutable copy to prevent "liga mx" also matching "la liga" on the same query
   const leagueRows = db
     .prepare('SELECT alias, league_slug FROM espn_leagues ORDER BY length(alias) DESC')
@@ -198,4 +198,3 @@ export function buildPreferenceSavedMessage(saved: ExtractedPreference[]): strin
   })
   return `Guardé tus preferencias:\n${parts.join('\n')}\n\nLas tendré en cuenta en futuras consultas deportivas.`
 }
-

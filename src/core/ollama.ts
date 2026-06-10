@@ -1,4 +1,4 @@
-import { getDefaultClient } from './llm-client.js'
+import { getClientForQuery } from './llm-client.js'
 
 const DEFAULT_SYSTEM_PROMPT = `You are Null, a knowledgeable AI assistant.
 You are concise, accurate, and helpful.
@@ -25,7 +25,7 @@ export async function streamChat(
   onToken: (token: string) => void,
   customMessages?: { role: string; content: string }[],
   systemPrompt?: string,
-  options?: { temperature?: number },
+  options?: { temperature?: number; think?: boolean },
 ): Promise<string> {
   const messages = customMessages || [
     {
@@ -42,6 +42,7 @@ export async function streamChat(
     })),
   ]
 
-  const client = getDefaultClient()
+  const lastUserMessage = [...fullMessages].reverse().find((message) => message.role === 'user')
+  const client = getClientForQuery(lastUserMessage?.content ?? prompt)
   return client.streamChat(fullMessages, onToken, options)
 }

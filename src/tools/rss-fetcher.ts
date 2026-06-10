@@ -85,7 +85,7 @@ export async function fetchFeed(source: NewsSource): Promise<NewsArticle[]> {
     const articles: NewsArticle[] = []
 
     for (const item of feed.items ?? []) {
-      const title = (item.title ?? '').trim()
+      const title = cleanText(item.title ?? '')
       const url = (item.link ?? item.guid ?? '').trim()
       if (!title || !url) continue
 
@@ -99,7 +99,7 @@ export async function fetchFeed(source: NewsSource): Promise<NewsArticle[]> {
         item.summary ??
         ''
 
-      const snippet = stripHtml(rawContent).slice(0, 1500).trim()
+      const snippet = cleanText(stripHtml(rawContent)).slice(0, 1500).trim()
 
       const publishedAt = item.isoDate ?? item.pubDate ?? ''
 
@@ -246,9 +246,9 @@ export function getCachedArticles(maxAgeHours = 6): NewsArticle[] {
     sourceId: r.source_id,
     biasBase: r.bias_base,
     reliability: r.reliability,
-    title: r.title,
+    title: cleanText(r.title),
     url: r.url,
-    snippet: r.snippet ?? '',
+    snippet: cleanText(r.snippet ?? ''),
     publishedAt: r.published_at ?? '',
     category: r.category ?? undefined,
   }))
@@ -278,9 +278,29 @@ function persistArticles(sourceId: number, articles: NewsArticle[], db: ReturnTy
   insertMany(articles)
 }
 
+export function cleanText(text: string): string {
+  if (!text) return ''
+  let clean = text
+
+  for (let i = 0; i < 3; i++) {
+    clean = clean
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, '$1')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)))
+      .replace(/&#x([0-9a-f]+);/gi, (_m, n) => String.fromCharCode(parseInt(n, 16)))
+  }
+
+  return clean.replace(/\s+/g, ' ').trim()
+}
+
 function stripHtml(html: string): string {
   if (!html) return ''
-  return html
+  return cleanText(html
     // Drop social media embeds (their text is metadata like "View this post
     // on Instagram" or fake author names — not article content).
     .replace(/<blockquote[^>]*class="[^"]*(instagram-media|twitter-tweet|tiktok-embed|fb-post|fb-video)[^"]*"[^>]*>[\s\S]*?<\/blockquote>/gi, ' ')
@@ -297,17 +317,8 @@ function stripHtml(html: string): string {
     .replace(/<a[^>]*>([\s\S]*?)<\/a>/gi, '$1')
     // Strip remaining tags
     .replace(/<[^>]+>/g, ' ')
-    // Decode common HTML entities
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)))
     // Collapse whitespace
-    .replace(/\s+/g, ' ')
-    .trim()
+    .replace(/\s+/g, ' '))
 }
 
 function normalizeDate(raw: string): string {

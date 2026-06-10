@@ -1,5 +1,5 @@
 import { getRouterClient } from '../core/llm-client.js'
-import { upsertMemories, type MemoryType, type UpsertMemoryOptions } from './memory-store.js'
+import { upsertMemories, upsertMemory, type MemoryType, type UpsertMemoryOptions } from './memory-store.js'
 import { debugLog } from '../utils/debug.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -9,6 +9,38 @@ export interface ExtractedMemory {
   value: string
   confidence: number
   raw: string
+}
+
+export function extractDeterministicMemoriesFromMessage(message: string): ExtractedMemory[] {
+  const results: ExtractedMemory[] = []
+  const namePatterns = [
+    /\bme\s+llamo\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,3})/i,
+    /\bmi\s+nombre\s+es\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+){0,3})/i,
+  ]
+
+  for (const pattern of namePatterns) {
+    const match = message.match(pattern)
+    if (!match) continue
+
+    const value = match[1].trim().replace(/[.!?,;:]+$/, '')
+    const memory: ExtractedMemory = {
+      type: 'alias_self',
+      value,
+      confidence: 1,
+      raw: match[0],
+    }
+    upsertMemory({
+      type: memory.type,
+      value: memory.value,
+      rawValue: memory.raw,
+      confidence: memory.confidence,
+      source: 'explicit',
+    })
+    results.push(memory)
+    break
+  }
+
+  return results
 }
 
 // ── Prompt ────────────────────────────────────────────────────────────────────

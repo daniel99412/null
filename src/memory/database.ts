@@ -2,9 +2,9 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import os from 'os'
 import fs from 'fs'
-import { createRequire } from 'module'
+import { fileURLToPath } from 'url'
 
-const _require = createRequire(import.meta.url)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const DATA_DIR = path.join(os.homedir(), '.null-cli')
 const DB_PATH = path.join(DATA_DIR, 'null.db')
@@ -153,25 +153,25 @@ export function getDb(): Database.Database {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- ── ESPN catalog tables ───────────────────────────────────────────────────
-    -- These replace static in-code maps in espn.ts.
+    -- ── sports catalog tables ───────────────────────────────────────────────────
+    -- These replace static in-code maps in sports.ts.
     -- Editable at runtime: INSERT/UPDATE rows without recompiling.
 
-    -- League aliases → ESPN API slug + sport (replaces LEAGUE_MAP + LEAGUE_SPORT_MAP)
+    -- League aliases → provider API slug + sport (replaces LEAGUE_MAP + LEAGUE_SPORT_MAP)
     CREATE TABLE IF NOT EXISTS espn_leagues (
       alias        TEXT PRIMARY KEY,   -- normalized lowercase: 'liga mx', 'epl', 'laliga'
-      league_slug  TEXT NOT NULL,      -- ESPN API slug: 'mex.1', 'eng.1', 'nba'
-      sport        TEXT NOT NULL       -- ESPN sport path: 'soccer', 'basketball', 'football', 'baseball', 'hockey'
+      league_slug  TEXT NOT NULL,      -- provider API slug: 'mex.1', 'eng.1', 'nba'
+      sport        TEXT NOT NULL       -- provider sport path: 'soccer', 'basketball', 'football', 'baseball', 'hockey'
     );
 
     CREATE INDEX IF NOT EXISTS idx_espn_leagues_slug ON espn_leagues(league_slug);
 
-    -- Team aliases → league slug + ESPN team ID (replaces TEAM_LEAGUE_MAP + TEAM_ID_MAP)
+    -- Team aliases → league slug + provider team ID (replaces TEAM_LEAGUE_MAP + TEAM_ID_MAP)
     CREATE TABLE IF NOT EXISTS espn_teams (
       alias        TEXT PRIMARY KEY,   -- normalized lowercase: 'atlas', 'zorros', 'man city'
       canonical    TEXT NOT NULL,      -- canonical team name: 'atlas', 'manchester city'
-      league_slug  TEXT NOT NULL,      -- ESPN league slug: 'mex.1', 'eng.1'
-      espn_id      TEXT               -- ESPN team ID (nullable — not all teams have one yet)
+      league_slug  TEXT NOT NULL,      -- provider league slug: 'mex.1', 'eng.1'
+      espn_id      TEXT               -- provider team ID (nullable — not all teams have one yet)
     );
 
     CREATE INDEX IF NOT EXISTS idx_espn_teams_canonical ON espn_teams(canonical);
@@ -277,7 +277,7 @@ export function getDb(): Database.Database {
 
   seedAliases(db)
 
-  // ── Seed ESPN catalog tables ───────────────────────────────────────────────
+  // ── Seed sports catalog tables ───────────────────────────────────────────────
 
   seedEspnLeagues(db)
   seedEspnTeams(db)
@@ -312,7 +312,7 @@ export function closeDb(): void {
 type AliasSeedRow = { alias: string; canonical: string; type: string }
 
 function seedAliases(database: Database.Database): void {
-  const seedPath = path.resolve(path.dirname(_require.resolve('../memory/database.js')), '../seeds/aliases.json')
+  const seedPath = path.resolve(__dirname, '../seeds/aliases.json')
   let rows: AliasSeedRow[] = []
   try {
     rows = JSON.parse(fs.readFileSync(seedPath, 'utf-8')) as AliasSeedRow[]
@@ -331,12 +331,12 @@ function seedAliases(database: Database.Database): void {
   insertMany(rows)
 }
 
-// ── ESPN leagues seed ─────────────────────────────────────────────────────────
+// ── Sports leagues seed ─────────────────────────────────────────────────────────
 //
-// Replaces LEAGUE_MAP + LEAGUE_SPORT_MAP in espn.ts.
+// Replaces LEAGUE_MAP + LEAGUE_SPORT_MAP in sports.ts.
 // INSERT OR IGNORE — safe to run on every startup. Add new leagues here only.
 
-const ESPN_LEAGUES_SEED: { alias: string; league_slug: string; sport: string }[] = [
+const SPORTS_LEAGUES_SEED: { alias: string; league_slug: string; sport: string }[] = [
   // Liga MX
   { alias: 'liga mx', league_slug: 'mex.1', sport: 'soccer' },
   { alias: 'ligamx', league_slug: 'mex.1', sport: 'soccer' },
@@ -415,21 +415,21 @@ function seedEspnLeagues(database: Database.Database): void {
   const insert = database.prepare(
     'INSERT OR IGNORE INTO espn_leagues (alias, league_slug, sport) VALUES (?, ?, ?)',
   )
-  const insertMany = database.transaction((rows: typeof ESPN_LEAGUES_SEED) => {
+  const insertMany = database.transaction((rows: typeof SPORTS_LEAGUES_SEED) => {
     for (const row of rows) {
       insert.run(row.alias.toLowerCase(), row.league_slug, row.sport)
     }
   })
-  insertMany(ESPN_LEAGUES_SEED)
+  insertMany(SPORTS_LEAGUES_SEED)
 }
 
-// ── ESPN teams seed ───────────────────────────────────────────────────────────
+// ── Sports teams seed ───────────────────────────────────────────────────────────
 //
 // Replaces TEAM_LEAGUE_MAP + TEAM_ID_MAP in espn.ts.
-// canonical = the canonical team name used by ESPN (used to group aliases).
-// espn_id = numeric ESPN team ID (NULL for leagues/teams not yet mapped).
+// canonical = the canonical team name used by provider data (used to group aliases).
+// espn_id = numeric provider team ID (NULL for leagues/teams not yet mapped).
 
-const ESPN_TEAMS_SEED: { alias: string; canonical: string; league_slug: string; espn_id: string | null }[] = [
+const SPORTS_TEAMS_SEED: { alias: string; canonical: string; league_slug: string; espn_id: string | null }[] = [
   // ── Liga MX ──────────────────────────────────────────────────────────────
   { alias: 'america', canonical: 'america', league_slug: 'mex.1', espn_id: '227' },
   { alias: 'águilas', canonical: 'america', league_slug: 'mex.1', espn_id: '227' },
@@ -528,12 +528,12 @@ function seedEspnTeams(database: Database.Database): void {
   const insert = database.prepare(
     'INSERT OR IGNORE INTO espn_teams (alias, canonical, league_slug, espn_id) VALUES (?, ?, ?, ?)',
   )
-  const insertMany = database.transaction((rows: typeof ESPN_TEAMS_SEED) => {
+  const insertMany = database.transaction((rows: typeof SPORTS_TEAMS_SEED) => {
     for (const row of rows) {
       insert.run(row.alias.toLowerCase(), row.canonical.toLowerCase(), row.league_slug, row.espn_id)
     }
   })
-  insertMany(ESPN_TEAMS_SEED)
+  insertMany(SPORTS_TEAMS_SEED)
 }
 
 // ── Migrate user_preferences → memories ──────────────────────────────────────

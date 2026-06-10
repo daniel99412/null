@@ -133,6 +133,16 @@ class MCPRegistry {
   }
 
   /**
+   * Return Ollama tool definitions filtered by allowed tool name.
+   * Unknown names are ignored so agent profiles can be conservative.
+   */
+  getOllamaToolsFor(allowedTools: string[]): OllamaToolFormat[] {
+    if (allowedTools.length === 0) return []
+    const allowed = new Set(allowedTools)
+    return this.getOllamaTools().filter((tool) => allowed.has(tool.function.name))
+  }
+
+  /**
    * Return slash commands for the slash menu (/ commands).
    * Derived from internal tool definitions with showInSlashMenu: true.
    */

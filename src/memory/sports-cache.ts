@@ -1,5 +1,5 @@
 import { getDb } from './database.js'
-import type { ESPNScoreboard, ESPNNewsArticle, ESPNStandings, ESPNGameSummary } from '../tools/espn.js'
+import type { SportsScoreboard, SportsNewsArticle, SportsStandings, SportsGameSummary } from '../tools/sports.js'
 
 const TTL_FINALS_ONLY = 86400   // 24 hours — all games are final, data won't change
 const TTL_HAS_LIVE    = 300     // 5 minutes — live game in progress
@@ -14,7 +14,7 @@ const TTL_SUMMARY     = 86400   // 24 hours — completed game summaries don't c
  * - Any game scheduled for today → 5 min
  * - All games final → 24 hours
  */
-function resolveTtl(scoreboard: ESPNScoreboard): number {
+function resolveTtl(scoreboard: SportsScoreboard): number {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
   const todayEnd = new Date()
@@ -73,29 +73,29 @@ function setCache(key: string, value: unknown, ttl: number): void {
 export function buildCacheKey(leagueSlug: string, fromDate: Date, toDate: Date): string {
   const fmt = (d: Date) =>
     `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
-  return `espn:scoreboard:${leagueSlug}:${fmt(fromDate)}-${fmt(toDate)}`
+  return `sports:scoreboard:${leagueSlug}:${fmt(fromDate)}-${fmt(toDate)}`
 }
 
 export function buildNewsCacheKey(leagueSlug: string, teamId?: string): string {
   return teamId
-    ? `espn:news:${leagueSlug}:team:${teamId}`
-    : `espn:news:${leagueSlug}`
+    ? `sports:news:${leagueSlug}:team:${teamId}`
+    : `sports:news:${leagueSlug}`
 }
 
 export function buildStandingsCacheKey(leagueSlug: string): string {
-  return `espn:standings:${leagueSlug}`
+  return `sports:standings:${leagueSlug}`
 }
 
 export function buildSummaryCacheKey(leagueSlug: string, gameId: string): string {
-  return `espn:summary:${leagueSlug}:${gameId}`
+  return `sports:summary:${leagueSlug}:${gameId}`
 }
 
 // ---------------------------------------------------------------------------
 // Scoreboard cache
 // ---------------------------------------------------------------------------
 
-export function getCachedScoreboard(key: string): ESPNScoreboard | null {
-  const parsed = getCache<ESPNScoreboard>(key)
+export function getCachedScoreboard(key: string): SportsScoreboard | null {
+  const parsed = getCache<SportsScoreboard>(key)
   if (!parsed) return null
   // Rehydrate Date objects inside effectiveRange (JSON serializes them as strings)
   parsed.effectiveRange = {
@@ -105,7 +105,7 @@ export function getCachedScoreboard(key: string): ESPNScoreboard | null {
   return parsed
 }
 
-export function setCachedScoreboard(key: string, scoreboard: ESPNScoreboard): void {
+export function setCachedScoreboard(key: string, scoreboard: SportsScoreboard): void {
   setCache(key, scoreboard, resolveTtl(scoreboard))
 }
 
@@ -113,11 +113,11 @@ export function setCachedScoreboard(key: string, scoreboard: ESPNScoreboard): vo
 // News cache
 // ---------------------------------------------------------------------------
 
-export function getCachedNews(key: string): ESPNNewsArticle[] | null {
-  return getCache<ESPNNewsArticle[]>(key)
+export function getCachedNews(key: string): SportsNewsArticle[] | null {
+  return getCache<SportsNewsArticle[]>(key)
 }
 
-export function setCachedNews(key: string, articles: ESPNNewsArticle[]): void {
+export function setCachedNews(key: string, articles: SportsNewsArticle[]): void {
   setCache(key, articles, TTL_NEWS)
 }
 
@@ -125,11 +125,11 @@ export function setCachedNews(key: string, articles: ESPNNewsArticle[]): void {
 // Standings cache
 // ---------------------------------------------------------------------------
 
-export function getCachedStandings(key: string): ESPNStandings | null {
-  return getCache<ESPNStandings>(key)
+export function getCachedStandings(key: string): SportsStandings | null {
+  return getCache<SportsStandings>(key)
 }
 
-export function setCachedStandings(key: string, standings: ESPNStandings): void {
+export function setCachedStandings(key: string, standings: SportsStandings): void {
   setCache(key, standings, TTL_STANDINGS)
 }
 
@@ -137,11 +137,11 @@ export function setCachedStandings(key: string, standings: ESPNStandings): void 
 // Game summary cache
 // ---------------------------------------------------------------------------
 
-export function getCachedSummary(key: string): ESPNGameSummary | null {
-  return getCache<ESPNGameSummary>(key)
+export function getCachedSummary(key: string): SportsGameSummary | null {
+  return getCache<SportsGameSummary>(key)
 }
 
-export function setCachedSummary(key: string, summary: ESPNGameSummary): void {
+export function setCachedSummary(key: string, summary: SportsGameSummary): void {
   setCache(key, summary, TTL_SUMMARY)
 }
 

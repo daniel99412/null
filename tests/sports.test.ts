@@ -1,9 +1,9 @@
 /**
- * Regression tests for src/tools/espn.ts
+ * Regression tests for src/tools/sports.ts
  *
  * These tests are purely synchronous / unit-level — no network calls.
  * They cover:
- *   - detectLeague()       → maps natural language to ESPN slugs
+ *   - detectLeague()       → maps natural language to provider slugs
  *   - detectDateIntent()   → 'lastMatchday' vs 'range'
  *   - hasExplicitDateRange() → true/false
  *   - detectDateRange()    → correct DateRange for each keyword
@@ -15,7 +15,7 @@ import {
   detectDateIntent,
   hasExplicitDateRange,
   detectDateRange,
-} from '../src/tools/espn.js'
+} from '../src/tools/sports.js'
 
 // ---------------------------------------------------------------------------
 // detectLeague
