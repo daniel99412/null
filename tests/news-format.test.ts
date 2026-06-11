@@ -55,7 +55,7 @@ describe('news article context', () => {
     expect(context).toContain('Every card MUST include all three labeled fields')
     expect(context).toContain('Bad format: a card with only two unlabeled lines')
     expect(context).toContain('Do NOT claim this is verified by an external rating service')
-    expect(context).toContain('For sports, health, entertainment, technology, education, weather, or general service stories, write "no estimable"')
+    expect(context).toContain('For health, entertainment, technology, education, weather, or general service stories, write "no estimable"')
     expect(context).toContain('Source: example1.com')
   })
 

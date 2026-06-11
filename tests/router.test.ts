@@ -139,6 +139,11 @@ describe('router → sportsQuery (heuristic)', () => {
     'jugó el atlas este fin de semana',
     // Fin de semana
     'me puedes dar los resultados del fin de semana de la liga mx',
+    // Noticias deportivas
+    'noticias deportivas',
+    'noticias de la liga mx',
+    'noticias del mundial',
+    'noticias de la selección mexicana',
   ]
 
   for (const query of cases) {

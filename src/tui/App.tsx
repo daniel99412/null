@@ -16,6 +16,7 @@ import { Footer } from './components/Footer.js'
 import { printGoodbye } from './components/Goodbye.js'
 import { CommandPalette } from './components/CommandPalette.js'
 import type { CommandItem } from './components/CommandPalette.js'
+import { NewsList } from './components/NewsList.js'
 import { SlashMenu } from './components/SlashMenu.js'
 import type { SlashCommandEntry } from './components/SlashMenu.js'
 import { getRegistry } from '../mcp/registry.js'
@@ -61,7 +62,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
-type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all' | 'article-reader' | 'keybindings'
+type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all' | 'news-list' | 'article-reader' | 'keybindings'
 
 interface ChatProps {
   resumeSessionId?: string
@@ -186,8 +187,9 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const [overlay, setOverlay] = useState<Overlay>('none')
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
   const [digestArticles, setDigestArticles] = useState<Array<{ position: number; title: string; url: string; source: string; category: string }>>([])
-  const [readerShortcutsActive, setReaderShortcutsActive] = useState(false)
+  const [newsKeySequence, setNewsKeySequence] = useState<'idle' | 'awaiting-down'>('idle')
   const [readingArticle, setReadingArticle] = useState<DigestArticle | null>(null)
+  const [articleReaderReturnOverlay, setArticleReaderReturnOverlay] = useState<Overlay | null>(null)
   const [fileMatches, setFileMatches] = useState<FileEntry[]>([])
   const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
   const messageCountRef = useRef(0)
@@ -505,30 +507,24 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
-    if (!isLoading && digestArticles.length > 0 && input.length === 0 && (char === 'r' || char === 'R')) {
-      setReaderShortcutsActive(true)
-      return
+    // Clear news key sequence on any unrelated keypress
+    if (newsKeySequence === 'awaiting-down' && !key.downArrow && !(key.ctrl && char === 'x')) {
+      setNewsKeySequence('idle')
     }
 
-    if (!isLoading && readerShortcutsActive && key.escape) {
-      setReaderShortcutsActive(false)
-      return
-    }
-
-    // Reader selection is explicit: press r, then 1-9/0.
-    if (!isLoading && readerShortcutsActive && /^[0-9]$/.test(char) && digestArticles.length > 0) {
-      const idx = char === '0' ? 9 : parseInt(char, 10) - 1
-      const article = digestArticles[idx]
-      if (article) {
-        setReaderShortcutsActive(false)
-        setReadingArticle(article)
-        setOverlay('article-reader')
-        return
+    // Ctrl+X ↓ opens news list
+    if (newsKeySequence === 'awaiting-down' && key.downArrow) {
+      setNewsKeySequence('idle')
+      if (!isLoading && digestArticles.length > 0) {
+        setOverlay('news-list')
       }
+      return
     }
 
-    if (!isLoading && readerShortcutsActive && char) {
-      setReaderShortcutsActive(false)
+    if (!isLoading && digestArticles.length > 0 && key.ctrl && char === 'x') {
+      setNewsKeySequence('awaiting-down')
+      setTimeout(() => setNewsKeySequence((prev) => prev === 'awaiting-down' ? 'idle' : prev), 2000)
+      return
     }
 
     if (isLoading) return
@@ -613,6 +609,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       setInput('')
       setCursorPos(0)
       setScrollOffset(0)
+      setDigestArticles([])
       startLoading()
       buffer.current = ''
 
@@ -694,10 +691,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           buffer.current = agentResult.directResponse
           if (agentResult.digestArticles && agentResult.digestArticles.length > 0) {
             setDigestArticles(agentResult.digestArticles)
-            setReaderShortcutsActive(false)
           } else {
             setDigestArticles([])
-            setReaderShortcutsActive(false)
           }
           return
         }
@@ -825,6 +820,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     overlay === 'confirm-delete-session' ||
     overlay === 'confirm-delete-all' ||
     overlay === 'color-picker' ||
+    overlay === 'news-list' ||
     overlay === 'keybindings' ||
     (overlay === 'article-reader' && readingArticle !== null)
 
@@ -872,7 +868,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           hasMoreLines={hasMoreLines}
           scrollOffset={scrollOffset}
           digestCount={digestArticles.length}
-          readerShortcutsActive={readerShortcutsActive}
+          newsListOpen={overlay === 'news-list'}
           dimmed={isModalOpen}
         />
       </Box>
@@ -950,13 +946,24 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
                 onClose={() => setOverlay('none')}
               />
             )}
+            {overlay === 'news-list' && digestArticles.length > 0 && (
+              <NewsList
+                articles={digestArticles}
+                onOpenArticle={(article) => {
+                  setReadingArticle(article)
+                  setArticleReaderReturnOverlay('news-list')
+                  setOverlay('article-reader')
+                }}
+                onClose={() => setOverlay('none')}
+              />
+            )}
             {overlay === 'article-reader' && readingArticle && (
               <ArticleReader
                 article={readingArticle}
                 onClose={() => {
-                  setOverlay('none')
+                  setOverlay(articleReaderReturnOverlay ?? 'none')
                   setReadingArticle(null)
-                  setReaderShortcutsActive(false)
+                  setArticleReaderReturnOverlay(null)
                 }}
               />
             )}

@@ -1,5 +1,5 @@
 /**
- * Regression tests for src/tools/sports.ts
+ * Regression tests for src/tools/sports
  *
  * These tests are purely synchronous / unit-level — no network calls.
  * They cover:
@@ -15,7 +15,7 @@ import {
   detectDateIntent,
   hasExplicitDateRange,
   detectDateRange,
-} from '../src/tools/sports.js'
+} from '../src/tools/sports/index.js'
 
 // ---------------------------------------------------------------------------
 // detectLeague
@@ -44,7 +44,9 @@ describe('detectLeague', () => {
   it('serie a', () => expect(detectLeague('serie a italia')).toBe('ita.1'))
   it('champions league', () => expect(detectLeague('champions league última jornada')).toBe('uefa.champions'))
   it('mls', () => expect(detectLeague('mls standings')).toBe('usa.1'))
-  it('nfl', () => expect(detectLeague('cómo estuvo el juego de la nfl')).toBe('nfl'))
+  it('libertadores', () => expect(detectLeague('resultados copa libertadores')).toBe('conmebol.libertadores'))
+  it('mundial', () => expect(detectLeague('noticias del mundial')).toBe('fifa.world'))
+  it('selección mexicana', () => expect(detectLeague('noticias de la selección mexicana')).toBe('fifa.world'))
 
   // Unknown league
   it('returns null for unknown sport', () => expect(detectLeague('cómo estuvo el juego de pickleball')).toBeNull())

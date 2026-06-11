@@ -13,6 +13,8 @@ function mapDecisionToAgent(decision: RoutingDecision): string {
       return 'weather'
     case 'webSearch':
       return 'web-search'
+    case 'sportsQuery':
+      return 'sports'
     case 'mexicoNewsDigest':
     case 'newsDigest':
       return 'news'

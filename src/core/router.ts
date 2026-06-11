@@ -3,7 +3,7 @@ import { debugLog } from '../utils/debug.js'
 import { classifyIntent } from './intent-classifier.js'
 import type { CLLMResult } from './intent-classifier.js'
 
-export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'mexicoNewsDigest' | 'newsDigest' | 'none'
+export type RoutingDecision = 'webSearch' | 'getDateTime' | 'getWeather' | 'mexicoNewsDigest' | 'newsDigest' | 'sportsQuery' | 'none'
 
 export interface RouterResult {
   decision: RoutingDecision
@@ -57,6 +57,7 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(cuántos|how many|cuánto mide|how tall|cuánto pesa|how much does)(?:\s).*\b(planeta|planet|país|country|estado|state)\b/i, intent: 'none', weight: 8, description: 'factual geography/science' },
   // ── NONE — history / knowledge ────────────────────────────────────────────
   { pattern: /\b(guerra|war|batalla|battle|conquista|conquest|tratado|treaty|imperio|empire)\b/i, intent: 'none', weight: 6, description: 'history event' },
+  { pattern: /\b(primera|segunda|first|second)\s+guerra\s+mundial\b|\bworld\s+war\s+(i|ii|one|two|1|2)\b/i, intent: 'none', weight: 20, description: 'world war' },
   { pattern: /(?:^|\s)(revolución|revolution|independencia|independence|reforma|reform)(?:\s|$)/i, intent: 'none', weight: 6, description: 'history movement' },
   { pattern: /\b(edad media|middle ages|renacimiento|renaissance|colonia|colonial)\b/i, intent: 'none', weight: 8, description: 'historical period' },
   { pattern: /(?:^|\s)(quién fue|who was|quién inventó|who invented|biografía|biography)(?:\s|$)/i, intent: 'none', weight: 6, description: 'biographical question' },
@@ -77,6 +78,15 @@ const SIGNALS: Signal[] = [
   { pattern: /(?:^|\s)(c[oó]mo\s+est[aá]\s+el\s+(clima|tiempo|d[íi]a))(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'how is the weather' },
   { pattern: /(?:^|\s)(qu[eé]\s+temperatura)(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'what temperature' },
   { pattern: /(?:^|\s)(va\s+a\s+llover|va\s+a\s+hacer\s+(calor|fr[íi]o))(?:\s|$|[?,.])/i, intent: 'getWeather', weight: 12, description: 'will it rain/be hot' },
+
+  // ── SPORTSQUERY — scores / standings / fixtures / sports news ─────────────
+  { pattern: /\b(liga\s*mx|ligamx|liga mexicana|premier league|premier|la liga|laliga|bundesliga|serie a|ligue 1|champions league|champions|mls|libertadores|mundial|world cup|copa del mundo|fifa world cup)\b/i, intent: 'sportsQuery', weight: 10, description: 'supported sports league' },
+  { pattern: /\b(resultados?|marcador(?:es)?|scores?|standings?|tabla(?:\s+general)?|posiciones|clasificaci[oó]n|calendario|fixture|pr[oó]ximos?\s+(partidos?|juegos?))\b/i, intent: 'sportsQuery', weight: 8, description: 'sports capability keyword' },
+  { pattern: /\b(noticias?|news|novedades?|fichajes?|transfers?)\b.*\b(deportes?|deportiv[ao]s?|liga\s*mx|ligamx|premier league|la liga|laliga|bundesliga|serie a|ligue 1|champions|mls|libertadores|mundial|world cup|copa del mundo)\b|\b(deportes?|deportiv[ao]s?|liga\s*mx|ligamx|premier league|la liga|laliga|bundesliga|serie a|ligue 1|champions|mls|libertadores|mundial|world cup|copa del mundo)\b.*\b(noticias?|news|novedades?|fichajes?|transfers?)\b/i, intent: 'sportsQuery', weight: 14, description: 'sports news' },
+  { pattern: /\bselecci[oó]n(?:\s+(mexicana|argentina|brasile[nñ]a|espa[nñ]ola|francesa|alemana|inglesa|colombiana|uruguaya|portuguesa|de\s+\w+))?\b/i, intent: 'sportsQuery', weight: 12, description: 'national team' },
+  { pattern: /\b([uú]ltima\s+jornada|jornada\s+(pasada|anterior)|jornada\s+\d+|c[oó]mo\s+qued[oó]|c[oó]mo\s+termin[oó]|cu[aá]ndo\s+juega|jug[oó]|jugaron)\b/i, intent: 'sportsQuery', weight: 10, description: 'matchday/game phrase' },
+  { pattern: /\b(america|am[eé]rica|atlas|chivas|guadalajara|reba[nñ]o|pumas|tigres|rayados|monterrey|cruz azul|toluca|le[oó]n|santos|pachuca)\b/i, intent: 'sportsQuery', weight: 10, description: 'liga mx team' },
+  { pattern: /\b(real madrid|barcelona|barca|barça|atl[eé]tico madrid|manchester city|man city|manchester united|liverpool|arsenal|chelsea|bayern|dortmund|juventus|inter milan|ac milan|psg)\b/i, intent: 'sportsQuery', weight: 10, description: 'major soccer team' },
 
   // ── NEWSDIGEST — topic-specific news queries ────────────────────────────
   { pattern: /\b(dame|d[aá]me)\b.*\b(las?\s+)?noticias?\b/i, intent: 'newsDigest', weight: 20, description: 'dame las noticias' },
@@ -110,6 +120,7 @@ function scoreQuery(query: string): Record<RoutingDecision, number> {
     getWeather: 0,
     mexicoNewsDigest: 0,
     newsDigest: 0,
+    sportsQuery: 0,
     none: 0,
   }
 

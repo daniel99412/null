@@ -8,6 +8,7 @@ import { upsertMemory, deleteMemory } from '../memory/memory-store.js'
 import { searchDocsHybrid, buildDocContext } from '../docs/retriever.js'
 import { indexDir } from '../docs/indexer.js'
 import { buildDocumentContextMessage, resolveDocumentParts } from './document-context.js'
+import { buildSportsContext } from '../tools/sports/index.js'
 
 export interface ToolDefinition {
   name: string
@@ -192,6 +193,25 @@ export const toolDefinitions = [
           return `Acción desconocida: ${subAction}. Usa: list, add, remove.`
       }
     },
+  },
+
+  {
+    name: 'sports_context',
+    description: 'Get sports scores, standings, fixtures, or sports news for supported soccer leagues and teams. Returns formatted table output and LLM context.',
+    aliases: ['sports', 'deportes'],
+    showInSlashMenu: true,
+    slashArgHint: '<query>',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Sports query, e.g. "resultados de la liga mx" or "tabla de la premier"',
+        },
+      },
+      required: ['query'],
+    },
+    handler: async (args) => buildSportsContext(args.query as string),
   },
 
   {

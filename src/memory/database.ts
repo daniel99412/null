@@ -191,6 +191,42 @@ export function getDb(): Database.Database {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- ── Sports agent tables ─────────────────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS leagues (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      country TEXT,
+      sport TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      league_id TEXT NOT NULL REFERENCES leagues(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS entity_providers (
+      entity_type TEXT NOT NULL CHECK (entity_type IN ('league', 'team')),
+      entity_id TEXT NOT NULL,
+      provider TEXT NOT NULL CHECK (provider IN ('fotmob', 'espn', 'sofascore')),
+      external_id TEXT NOT NULL,
+      PRIMARY KEY (entity_type, entity_id, provider)
+    );
+
+    CREATE TABLE IF NOT EXISTS sports_aliases (
+      alias TEXT PRIMARY KEY,
+      entity_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL CHECK (entity_type IN ('league', 'team'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sports_cache (
+      cache_key TEXT PRIMARY KEY,
+      result TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      ttl_seconds INTEGER NOT NULL
+    );
+
     -- ── Document index tables ─────────────────────────────────────────────────
 
     CREATE TABLE IF NOT EXISTS doc_index (
@@ -237,6 +273,10 @@ export function getDb(): Database.Database {
   // ── Seed news topics ────────────────────────────────────────────────────────
 
   seedNewsTopics(db)
+
+  // ── Seed sports catalog ───────────────────────────────────────────────────
+
+  seedSportsCatalog(db)
 
   return db
 }
@@ -493,6 +533,173 @@ function seedNewsTopics(database: Database.Database): void {
   insertMany(NEWS_TOPICS_SEED)
 }
 
+// ── Sports catalog seed ──────────────────────────────────────────────────────
+
+interface SportsLeagueSeed {
+  id: string
+  name: string
+  country: string | null
+  sport: string
+  fotmobId: string
+  espnSlug: string
+  aliases: string[]
+}
+
+interface SportsTeamSeed {
+  id: string
+  name: string
+  leagueId: string
+  espnId?: string
+  fotmobId?: string
+  aliases: string[]
+}
+
+const SPORTS_LEAGUES_SEED: SportsLeagueSeed[] = [
+  { id: 'liga_mx', name: 'Liga MX', country: 'México', sport: 'soccer', fotmobId: '10160', espnSlug: 'mex.1', aliases: ['liga mx', 'ligamx', 'liga mexicana', 'mexico liga mx'] },
+  { id: 'premier_league', name: 'Premier League', country: 'Inglaterra', sport: 'soccer', fotmobId: '47', espnSlug: 'eng.1', aliases: ['premier league', 'premier', 'epl', 'liga inglesa'] },
+  { id: 'la_liga', name: 'LaLiga', country: 'España', sport: 'soccer', fotmobId: '87', espnSlug: 'esp.1', aliases: ['la liga', 'laliga', 'liga española', 'espana primera'] },
+  { id: 'bundesliga', name: 'Bundesliga', country: 'Alemania', sport: 'soccer', fotmobId: '54', espnSlug: 'ger.1', aliases: ['bundesliga', 'liga alemana'] },
+  { id: 'serie_a', name: 'Serie A', country: 'Italia', sport: 'soccer', fotmobId: '55', espnSlug: 'ita.1', aliases: ['serie a', 'serie a italia', 'liga italiana'] },
+  { id: 'ligue_1', name: 'Ligue 1', country: 'Francia', sport: 'soccer', fotmobId: '53', espnSlug: 'fra.1', aliases: ['ligue 1', 'liga francesa'] },
+  { id: 'champions_league', name: 'Champions League', country: 'Europa', sport: 'soccer', fotmobId: '42', espnSlug: 'uefa.champions', aliases: ['champions league', 'champions', 'ucl', 'champions de europa'] },
+  { id: 'mls', name: 'MLS', country: 'Estados Unidos', sport: 'soccer', fotmobId: '130', espnSlug: 'usa.1', aliases: ['mls', 'major league soccer'] },
+  { id: 'libertadores', name: 'Copa Libertadores', country: 'Sudamérica', sport: 'soccer', fotmobId: '384', espnSlug: 'conmebol.libertadores', aliases: ['copa libertadores', 'libertadores'] },
+  { id: 'world_cup', name: 'FIFA World Cup', country: 'Internacional', sport: 'soccer', fotmobId: '77', espnSlug: 'fifa.world', aliases: ['mundial', 'world cup', 'fifa world cup', 'copa del mundo', 'mundial 2026', 'fifa world cup 2026'] },
+]
+
+const SPORTS_TEAMS_SEED: SportsTeamSeed[] = [
+  { id: 'america', name: 'América', leagueId: 'liga_mx', aliases: ['america', 'américa', 'club america', 'aguilas', 'águilas'] },
+  { id: 'atlas', name: 'Atlas', leagueId: 'liga_mx', aliases: ['atlas', 'zorros', 'rojinegros'] },
+  { id: 'chivas', name: 'Chivas', leagueId: 'liga_mx', aliases: ['chivas', 'guadalajara', 'rebaño', 'rebano sagrado'] },
+  { id: 'cruz_azul', name: 'Cruz Azul', leagueId: 'liga_mx', aliases: ['cruz azul', 'cementeros', 'maquina', 'máquina'] },
+  { id: 'pumas', name: 'Pumas UNAM', leagueId: 'liga_mx', aliases: ['pumas', 'pumas unam', 'unam'] },
+  { id: 'tigres', name: 'Tigres UANL', leagueId: 'liga_mx', aliases: ['tigres', 'tigres uanl'] },
+  { id: 'monterrey', name: 'Monterrey', leagueId: 'liga_mx', aliases: ['monterrey', 'rayados'] },
+  { id: 'toluca', name: 'Toluca', leagueId: 'liga_mx', aliases: ['toluca', 'diablos rojos'] },
+  { id: 'leon', name: 'León', leagueId: 'liga_mx', aliases: ['leon', 'león', 'club leon', 'fiera'] },
+  { id: 'santos', name: 'Santos Laguna', leagueId: 'liga_mx', aliases: ['santos', 'santos laguna', 'guerreros'] },
+  { id: 'pachuca', name: 'Pachuca', leagueId: 'liga_mx', aliases: ['pachuca', 'tuzos'] },
+  { id: 'manchester_city', name: 'Manchester City', leagueId: 'premier_league', aliases: ['manchester city', 'man city', 'city'] },
+  { id: 'manchester_united', name: 'Manchester United', leagueId: 'premier_league', aliases: ['manchester united', 'man united', 'man u', 'united'] },
+  { id: 'liverpool', name: 'Liverpool', leagueId: 'premier_league', aliases: ['liverpool'] },
+  { id: 'arsenal', name: 'Arsenal', leagueId: 'premier_league', aliases: ['arsenal'] },
+  { id: 'chelsea', name: 'Chelsea', leagueId: 'premier_league', aliases: ['chelsea'] },
+  { id: 'real_madrid', name: 'Real Madrid', leagueId: 'la_liga', aliases: ['real madrid', 'madrid'] },
+  { id: 'barcelona', name: 'Barcelona', leagueId: 'la_liga', aliases: ['barcelona', 'barca', 'barça'] },
+  { id: 'atletico_madrid', name: 'Atlético Madrid', leagueId: 'la_liga', aliases: ['atletico madrid', 'atlético madrid', 'atleti'] },
+  { id: 'bayern_munich', name: 'Bayern Munich', leagueId: 'bundesliga', aliases: ['bayern', 'bayern munich', 'bayern munchen'] },
+  { id: 'borussia_dortmund', name: 'Borussia Dortmund', leagueId: 'bundesliga', aliases: ['dortmund', 'borussia dortmund'] },
+  { id: 'juventus', name: 'Juventus', leagueId: 'serie_a', aliases: ['juventus', 'juve'] },
+  { id: 'inter_milan', name: 'Inter Milan', leagueId: 'serie_a', aliases: ['inter', 'inter milan', 'internazionale'] },
+  { id: 'ac_milan', name: 'AC Milan', leagueId: 'serie_a', aliases: ['milan', 'ac milan'] },
+  { id: 'psg', name: 'Paris Saint-Germain', leagueId: 'ligue_1', aliases: ['psg', 'paris saint germain', 'paris saint-germain'] },
+  { id: 'algeria_nt', name: 'Algeria', leagueId: 'world_cup', espnId: '624', aliases: ['algeria', 'argelia', 'seleccion de argelia'] },
+  { id: 'argentina_nt', name: 'Argentina', leagueId: 'world_cup', espnId: '202', aliases: ['argentina', 'seleccion argentina', 'albiceleste'] },
+  { id: 'australia_nt', name: 'Australia', leagueId: 'world_cup', espnId: '628', aliases: ['australia', 'seleccion de australia'] },
+  { id: 'austria_nt', name: 'Austria', leagueId: 'world_cup', espnId: '474', aliases: ['austria', 'seleccion de austria'] },
+  { id: 'belgium_nt', name: 'Belgium', leagueId: 'world_cup', espnId: '459', aliases: ['belgium', 'belgica', 'bélgica', 'seleccion de belgica'] },
+  { id: 'bosnia_herzegovina_nt', name: 'Bosnia-Herzegovina', leagueId: 'world_cup', espnId: '452', aliases: ['bosnia', 'bosnia-herzegovina', 'bosnia y herzegovina'] },
+  { id: 'brazil_nt', name: 'Brazil', leagueId: 'world_cup', espnId: '205', aliases: ['brazil', 'brasil', 'seleccion de brasil', 'canarinha'] },
+  { id: 'canada_nt', name: 'Canada', leagueId: 'world_cup', espnId: '206', aliases: ['canada', 'canadá', 'seleccion de canada'] },
+  { id: 'cape_verde_nt', name: 'Cape Verde', leagueId: 'world_cup', espnId: '2597', aliases: ['cape verde', 'cabo verde'] },
+  { id: 'colombia_nt', name: 'Colombia', leagueId: 'world_cup', espnId: '208', aliases: ['colombia', 'seleccion colombia', 'seleccion de colombia'] },
+  { id: 'congo_dr_nt', name: 'Congo DR', leagueId: 'world_cup', espnId: '2850', aliases: ['congo dr', 'dr congo', 'rd congo', 'republica democratica del congo'] },
+  { id: 'croatia_nt', name: 'Croatia', leagueId: 'world_cup', espnId: '477', aliases: ['croatia', 'croacia', 'seleccion de croacia'] },
+  { id: 'curacao_nt', name: 'Curaçao', leagueId: 'world_cup', espnId: '11678', aliases: ['curacao', 'curaçao'] },
+  { id: 'czechia_nt', name: 'Czechia', leagueId: 'world_cup', espnId: '450', aliases: ['czechia', 'chequia', 'republica checa'] },
+  { id: 'ecuador_nt', name: 'Ecuador', leagueId: 'world_cup', espnId: '209', aliases: ['ecuador', 'seleccion de ecuador'] },
+  { id: 'egypt_nt', name: 'Egypt', leagueId: 'world_cup', espnId: '2620', aliases: ['egypt', 'egipto', 'seleccion de egipto'] },
+  { id: 'england_nt', name: 'England', leagueId: 'world_cup', espnId: '448', aliases: ['england', 'inglaterra', 'seleccion de inglaterra'] },
+  { id: 'france_nt', name: 'France', leagueId: 'world_cup', espnId: '478', aliases: ['france', 'francia', 'seleccion de francia'] },
+  { id: 'germany_nt', name: 'Germany', leagueId: 'world_cup', espnId: '481', aliases: ['germany', 'alemania', 'seleccion de alemania'] },
+  { id: 'ghana_nt', name: 'Ghana', leagueId: 'world_cup', espnId: '4469', aliases: ['ghana', 'seleccion de ghana'] },
+  { id: 'haiti_nt', name: 'Haiti', leagueId: 'world_cup', espnId: '2654', aliases: ['haiti', 'haití', 'seleccion de haiti'] },
+  { id: 'iran_nt', name: 'Iran', leagueId: 'world_cup', espnId: '469', aliases: ['iran', 'irán', 'seleccion de iran'] },
+  { id: 'iraq_nt', name: 'Iraq', leagueId: 'world_cup', espnId: '4375', aliases: ['iraq', 'irak', 'seleccion de iraq'] },
+  { id: 'ivory_coast_nt', name: 'Ivory Coast', leagueId: 'world_cup', espnId: '4789', aliases: ['ivory coast', 'costa de marfil'] },
+  { id: 'japan_nt', name: 'Japan', leagueId: 'world_cup', espnId: '627', aliases: ['japan', 'japon', 'japón', 'seleccion de japon'] },
+  { id: 'jordan_nt', name: 'Jordan', leagueId: 'world_cup', espnId: '2917', aliases: ['jordan', 'jordania', 'seleccion de jordania'] },
+  { id: 'mexico_nt', name: 'Mexico', leagueId: 'world_cup', espnId: '203', aliases: ['mexico seleccion', 'méxico selección', 'seleccion mexicana', 'selección mexicana', 'tri', 'el tri'] },
+  { id: 'morocco_nt', name: 'Morocco', leagueId: 'world_cup', espnId: '2869', aliases: ['morocco', 'marruecos', 'seleccion de marruecos'] },
+  { id: 'netherlands_nt', name: 'Netherlands', leagueId: 'world_cup', espnId: '449', aliases: ['netherlands', 'paises bajos', 'países bajos', 'holanda'] },
+  { id: 'new_zealand_nt', name: 'New Zealand', leagueId: 'world_cup', espnId: '2666', aliases: ['new zealand', 'nueva zelanda'] },
+  { id: 'norway_nt', name: 'Norway', leagueId: 'world_cup', espnId: '464', aliases: ['norway', 'noruega', 'seleccion de noruega'] },
+  { id: 'panama_nt', name: 'Panama', leagueId: 'world_cup', espnId: '2659', aliases: ['panama', 'panamá', 'seleccion de panama'] },
+  { id: 'paraguay_nt', name: 'Paraguay', leagueId: 'world_cup', espnId: '210', aliases: ['paraguay', 'seleccion de paraguay'] },
+  { id: 'portugal_nt', name: 'Portugal', leagueId: 'world_cup', espnId: '482', aliases: ['portugal', 'seleccion de portugal'] },
+  { id: 'qatar_nt', name: 'Qatar', leagueId: 'world_cup', espnId: '4398', aliases: ['qatar', 'catar', 'seleccion de qatar'] },
+  { id: 'saudi_arabia_nt', name: 'Saudi Arabia', leagueId: 'world_cup', espnId: '655', aliases: ['saudi arabia', 'arabia saudita'] },
+  { id: 'scotland_nt', name: 'Scotland', leagueId: 'world_cup', espnId: '580', aliases: ['scotland', 'escocia', 'seleccion de escocia'] },
+  { id: 'senegal_nt', name: 'Senegal', leagueId: 'world_cup', espnId: '654', aliases: ['senegal', 'seleccion de senegal'] },
+  { id: 'south_africa_nt', name: 'South Africa', leagueId: 'world_cup', espnId: '467', aliases: ['south africa', 'sudafrica', 'sudáfrica'] },
+  { id: 'south_korea_nt', name: 'South Korea', leagueId: 'world_cup', espnId: '451', aliases: ['south korea', 'corea del sur', 'korea republic'] },
+  { id: 'spain_nt', name: 'Spain', leagueId: 'world_cup', espnId: '164', aliases: ['spain', 'espana', 'españa', 'seleccion española'] },
+  { id: 'sweden_nt', name: 'Sweden', leagueId: 'world_cup', espnId: '466', aliases: ['sweden', 'suecia', 'seleccion de suecia'] },
+  { id: 'switzerland_nt', name: 'Switzerland', leagueId: 'world_cup', espnId: '475', aliases: ['switzerland', 'suiza', 'seleccion de suiza'] },
+  { id: 'tunisia_nt', name: 'Tunisia', leagueId: 'world_cup', espnId: '659', aliases: ['tunisia', 'tunez', 'túnez', 'seleccion de tunez'] },
+  { id: 'turkiye_nt', name: 'Türkiye', leagueId: 'world_cup', espnId: '465', aliases: ['turkiye', 'turkey', 'turquia', 'turquía'] },
+  { id: 'united_states_nt', name: 'United States', leagueId: 'world_cup', espnId: '660', aliases: ['united states', 'estados unidos', 'usa seleccion', 'usmnt'] },
+  { id: 'uruguay_nt', name: 'Uruguay', leagueId: 'world_cup', espnId: '212', aliases: ['uruguay', 'seleccion de uruguay'] },
+  { id: 'uzbekistan_nt', name: 'Uzbekistan', leagueId: 'world_cup', espnId: '2570', aliases: ['uzbekistan', 'uzbekistán', 'uzbequistán'] },
+]
+
+function seedSportsCatalog(database: Database.Database): void {
+  const upsertLeague = database.prepare(`
+    INSERT INTO leagues (id, name, country, sport)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      country = excluded.country,
+      sport = excluded.sport
+  `)
+  const upsertTeam = database.prepare(`
+    INSERT INTO teams (id, name, league_id)
+    VALUES (?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      league_id = excluded.league_id
+  `)
+  const upsertProvider = database.prepare(`
+    INSERT INTO entity_providers (entity_type, entity_id, provider, external_id)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(entity_type, entity_id, provider) DO UPDATE SET
+      external_id = excluded.external_id
+  `)
+  const upsertAlias = database.prepare(`
+    INSERT INTO sports_aliases (alias, entity_id, entity_type)
+    VALUES (?, ?, ?)
+    ON CONFLICT(alias) DO UPDATE SET
+      entity_id = excluded.entity_id,
+      entity_type = excluded.entity_type
+  `)
+
+  const seed = database.transaction(() => {
+    for (const league of SPORTS_LEAGUES_SEED) {
+      upsertLeague.run(league.id, league.name, league.country, league.sport)
+      upsertProvider.run('league', league.id, 'fotmob', league.fotmobId)
+      upsertProvider.run('league', league.id, 'espn', league.espnSlug)
+      for (const alias of league.aliases) {
+        upsertAlias.run(alias.toLowerCase(), league.id, 'league')
+      }
+    }
+
+    for (const team of SPORTS_TEAMS_SEED) {
+      upsertTeam.run(team.id, team.name, team.leagueId)
+      if (team.espnId) {
+        upsertProvider.run('team', team.id, 'espn', team.espnId)
+      }
+      if (team.fotmobId) {
+        upsertProvider.run('team', team.id, 'fotmob', team.fotmobId)
+      }
+      for (const alias of team.aliases) {
+        upsertAlias.run(alias.toLowerCase(), team.id, 'team')
+      }
+    }
+  })
+
+  seed()
+}
+
 export function getNewsTopics(): NewsTopicRow[] {
   const db = getDb()
   return db.prepare('SELECT * FROM news_topics WHERE enabled = 1 ORDER BY name').all() as NewsTopicRow[]
@@ -525,7 +732,7 @@ export function cleanCaches(): number {
   const db = getDb()
   let total = 0
 
-  for (const table of ['search_cache', 'news_digest_cache', 'news_articles_cache']) {
+  for (const table of ['search_cache', 'news_digest_cache', 'news_articles_cache', 'sports_cache']) {
     const count = db.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }
     db.prepare(`DELETE FROM ${table}`).run()
     total += count.c

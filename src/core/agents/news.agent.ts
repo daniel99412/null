@@ -1,5 +1,6 @@
 import type { Agent } from '../agent.types.js'
 import { extractNewsTopic } from '../news-topic.js'
+import { buildNewsIntro } from '../news-intro.js'
 
 export const newsAgent: Agent = {
   id: 'news',
@@ -18,12 +19,13 @@ export const newsAgent: Agent = {
         const statusMessage = `Obteniendo noticias de ${topicName}...`
         context.onStatus?.(statusMessage)
         const digest = await buildTopicNewsDigest(topicName, query.text)
+        const directResponse = await buildNewsIntro(query.text, digest.articles.length)
 
         return {
           userContent: query.text,
           searchContext: null,
           statusMessage,
-          directResponse: digest.formatted,
+          directResponse,
           digestArticles: digest.articles,
         }
       }
@@ -31,12 +33,13 @@ export const newsAgent: Agent = {
       const statusMessage = 'Obteniendo noticias de todos los temas...'
       context.onStatus?.(statusMessage)
       const digest = await buildAllTopicsDigest()
+      const directResponse = await buildNewsIntro(query.text, digest.articles.length)
 
       return {
         userContent: query.text,
         searchContext: null,
         statusMessage,
-        directResponse: digest.formatted,
+        directResponse,
         digestArticles: digest.articles,
       }
     } catch (err) {

@@ -12,7 +12,7 @@ interface FooterProps {
   scrollOffset: number;
   statusText?: string;
   digestCount?: number;
-  readerShortcutsActive?: boolean;
+  newsListOpen?: boolean;
   dimmed?: boolean;
 }
 
@@ -25,7 +25,7 @@ export function Footer({
   scrollOffset,
   statusText = "",
   digestCount = 0,
-  readerShortcutsActive = false,
+  newsListOpen = false,
   dimmed = false,
 }: FooterProps) {
   const { accent } = useTheme();
@@ -46,35 +46,31 @@ export function Footer({
             {scrollOffset} lines above{" "}
           </Text>
         ) : null}
-        {digestCount > 0 && !isLoading && readerShortcutsActive ? (
+        {digestCount > 0 && !isLoading && newsListOpen ? (
           <>
             <Text color="gray" dimColor={dimmed}>
-              {digestCount > 9 ? "0-9" : "1-9"}
+              enter
             </Text>
             <Text color="white" dimColor={dimmed}>
               {" "}
-              leer{" "}
+              abrir{" "}
             </Text>
             <Text color="gray" dimColor={dimmed}>
               esc
             </Text>
             <Text color="white" dimColor={dimmed}>
               {" "}
-              cerrar reader{" "}
+              cerrar{" "}
             </Text>
           </>
         ) : null}
-        {digestCount > 0 && !isLoading && !readerShortcutsActive ? (
-          <>
-            <Text color="gray" dimColor={dimmed}>
-              r
-            </Text>
-            <Text color="white" dimColor={dimmed}>
-              {" "}
-              reader{" "}
-            </Text>
-          </>
-        ) : null}
+        <Text color="gray" dimColor={dimmed}>
+          ctrl+x
+        </Text>
+        <Text color="white" dimColor={dimmed}>
+          {" "}
+          ↓ noticias{" "}
+        </Text>
         <Text color="gray" dimColor={dimmed}>
           ctrl+p
         </Text>

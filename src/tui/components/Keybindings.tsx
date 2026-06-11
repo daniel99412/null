@@ -10,6 +10,7 @@ interface KeybindingEntry {
 const KEYBINDINGS: KeybindingEntry[] = [
   { keys: 'Ctrl+H', action: 'Open keybindings' },
   { keys: 'Ctrl+P', action: 'Open command palette' },
+  { keys: 'Ctrl+X ↓', action: 'Open news list' },
   { keys: 'Ctrl+W', action: 'Delete previous word' },
   { keys: 'Ctrl+C', action: 'Exit null' },
   { keys: 'Enter', action: 'Send message' },

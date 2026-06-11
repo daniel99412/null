@@ -222,6 +222,65 @@ async function fetchViaCurlCffi(
 }
 
 /**
+ * Extract the article ID from an ESPN story URL.
+ * ESPN URLs follow the pattern: /id/{digits}/
+ * e.g. https://www.espn.com/soccer/story/_/id/48960694/article-slug
+ */
+function extractESPNArticleId(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname.endsWith('espn.com')) {
+      const match = parsed.pathname.match(/\/id\/(\d+)\//)
+      if (match) return match[1]
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Fetch an ESPN article via the content.core.api.espn.com API.
+ * This bypasses the client-side rendering issue of ESPN's web pages.
+ * Returns plain text extracted from the story HTML, or '' on failure.
+ */
+async function fetchViaESPNContentAPI(
+  url: string,
+  maxChars: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const articleId = extractESPNArticleId(url)
+  if (!articleId) return ''
+
+  try {
+    const apiUrl = `https://content.core.api.espn.com/v1/sports/news/${articleId}`
+    const res = await fetch(apiUrl, {
+      headers: {
+        'User-Agent': 'Null CLI sports agent',
+        'Accept': 'application/json',
+      },
+      signal,
+      redirect: 'follow',
+    })
+    if (!res.ok) return ''
+
+    const data = (await res.json()) as { headlines?: Array<{ story?: string }> }
+    const story = data?.headlines?.[0]?.story
+    if (!story) return ''
+
+    // Strip HTML tags, collapse whitespace, decode entities
+    let text = story
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    text = decodeEntities(text)
+    return text.slice(0, maxChars)
+  } catch {
+    return ''
+  }
+}
+
+/**
  * Fetch a web page and extract readable text content.
  * Strips HTML tags, scripts, styles, and excess whitespace.
  * Preserves table structure as formatted text.
@@ -235,6 +294,19 @@ export async function fetchPageText(
 ): Promise<string> {
   const maxChars = options?.maxChars ?? 8000
   const externalSignal = options?.signal
+
+  // ---- Attempt 0: ESPN content API (bypasses JS-rendered pages) ----
+  const apiController = new AbortController()
+  const apiTimeout = setTimeout(() => apiController.abort(), 5000)
+  const onApiAbort = () => apiController.abort()
+  externalSignal?.addEventListener('abort', onApiAbort)
+  try {
+    const apiText = await fetchViaESPNContentAPI(url, maxChars, apiController.signal)
+    if (apiText) return apiText
+  } finally {
+    clearTimeout(apiTimeout)
+    externalSignal?.removeEventListener('abort', onApiAbort)
+  }
 
   // ---- Attempt 1: direct fetch ----
   try {
