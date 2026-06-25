@@ -17,6 +17,8 @@ import { printGoodbye } from './components/Goodbye.js'
 import { CommandPalette } from './components/CommandPalette.js'
 import type { CommandItem } from './components/CommandPalette.js'
 import { NewsList } from './components/NewsList.js'
+import { MatchList } from './components/MatchList.js'
+import { MatchDetail } from './components/MatchDetail.js'
 import { SlashMenu } from './components/SlashMenu.js'
 import type { SlashCommandEntry } from './components/SlashMenu.js'
 import { getRegistry } from '../mcp/registry.js'
@@ -25,7 +27,8 @@ import { ColorPicker } from './components/ColorPicker.js'
 import { Keybindings } from './components/Keybindings.js'
 import { FirstRunSetup } from './components/FirstRunSetup.js'
 import { Sidebar, SIDEBAR_WIDTH } from './components/Sidebar.js'
-import { ArticleReader, type DigestArticle } from './components/ArticleReader.js'
+import { ArticleReader } from './components/ArticleReader.js'
+import type { DigestArticle, DigestMatch } from '../core/agent.types.js'
 import { ThemeProvider } from './context/ThemeContext.js'
 import {
   createSession,
@@ -62,7 +65,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },
 ]
 
-type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all' | 'news-list' | 'article-reader' | 'keybindings'
+type Overlay = 'none' | 'command-palette' | 'sessions' | 'color-picker' | 'confirm-delete-session' | 'confirm-delete-all' | 'news-list' | 'article-reader' | 'keybindings' | 'match-list' | 'match-detail'
 
 interface ChatProps {
   resumeSessionId?: string
@@ -187,9 +190,13 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
   const [overlay, setOverlay] = useState<Overlay>('none')
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
   const [digestArticles, setDigestArticles] = useState<Array<{ position: number; title: string; url: string; source: string; category: string }>>([])
+  const [digestMatches, setDigestMatches] = useState<DigestMatch[]>([])
   const [newsKeySequence, setNewsKeySequence] = useState<'idle' | 'awaiting-down'>('idle')
+  const [matchKeySequence, setMatchKeySequence] = useState<'idle' | 'awaiting-down'>('idle')
   const [readingArticle, setReadingArticle] = useState<DigestArticle | null>(null)
   const [articleReaderReturnOverlay, setArticleReaderReturnOverlay] = useState<Overlay | null>(null)
+  const [selectedMatch, setSelectedMatch] = useState<DigestMatch | null>(null)
+  const [matchDetailReturnOverlay, setMatchDetailReturnOverlay] = useState<Overlay | null>(null)
   const [fileMatches, setFileMatches] = useState<FileEntry[]>([])
   const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
   const messageCountRef = useRef(0)
@@ -507,21 +514,28 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       return
     }
 
-    // Clear news key sequence on any unrelated keypress
+    // Clear key sequences on any unrelated keypress
     if (newsKeySequence === 'awaiting-down' && !key.downArrow && !(key.ctrl && char === 'x')) {
       setNewsKeySequence('idle')
     }
+    if (matchKeySequence === 'awaiting-down' && !key.downArrow && !(key.ctrl && char === 'x')) {
+      setMatchKeySequence('idle')
+    }
 
-    // Ctrl+X ↓ opens news list
+    // Ctrl+X ↓ opens news list or match list
     if (newsKeySequence === 'awaiting-down' && key.downArrow) {
       setNewsKeySequence('idle')
-      if (!isLoading && digestArticles.length > 0) {
-        setOverlay('news-list')
+      if (!isLoading) {
+        if (digestArticles.length > 0) {
+          setOverlay('news-list')
+        } else if (digestMatches.length > 0) {
+          setOverlay('match-list')
+        }
       }
       return
     }
 
-    if (!isLoading && digestArticles.length > 0 && key.ctrl && char === 'x') {
+    if (!isLoading && (digestArticles.length > 0 || digestMatches.length > 0) && key.ctrl && char === 'x') {
       setNewsKeySequence('awaiting-down')
       setTimeout(() => setNewsKeySequence((prev) => prev === 'awaiting-down' ? 'idle' : prev), 2000)
       return
@@ -610,6 +624,7 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
       setCursorPos(0)
       setScrollOffset(0)
       setDigestArticles([])
+      setDigestMatches([])
       startLoading()
       buffer.current = ''
 
@@ -693,6 +708,11 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             setDigestArticles(agentResult.digestArticles)
           } else {
             setDigestArticles([])
+          }
+          if (agentResult.digestMatches && agentResult.digestMatches.length > 0) {
+            setDigestMatches(agentResult.digestMatches)
+          } else {
+            setDigestMatches([])
           }
           return
         }
@@ -821,8 +841,10 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     overlay === 'confirm-delete-all' ||
     overlay === 'color-picker' ||
     overlay === 'news-list' ||
+    overlay === 'match-list' ||
     overlay === 'keybindings' ||
-    (overlay === 'article-reader' && readingArticle !== null)
+    (overlay === 'article-reader' && readingArticle !== null) ||
+    (overlay === 'match-detail' && selectedMatch !== null)
 
   return (
     <Box flexDirection="row" height={terminalHeight}>
@@ -868,7 +890,8 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
           hasMoreLines={hasMoreLines}
           scrollOffset={scrollOffset}
           digestCount={digestArticles.length}
-          newsListOpen={overlay === 'news-list'}
+          matchCount={digestMatches.length}
+          overlayOpen={overlay === 'news-list' || overlay === 'match-list'}
           dimmed={isModalOpen}
         />
       </Box>
@@ -964,6 +987,27 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
                   setOverlay(articleReaderReturnOverlay ?? 'none')
                   setReadingArticle(null)
                   setArticleReaderReturnOverlay(null)
+                }}
+              />
+            )}
+            {overlay === 'match-list' && digestMatches.length > 0 && (
+              <MatchList
+                matches={digestMatches}
+                onOpenMatch={(match) => {
+                  setSelectedMatch(match)
+                  setMatchDetailReturnOverlay('match-list')
+                  setOverlay('match-detail')
+                }}
+                onClose={() => setOverlay('none')}
+              />
+            )}
+            {overlay === 'match-detail' && selectedMatch && (
+              <MatchDetail
+                match={selectedMatch}
+                onClose={() => {
+                  setOverlay(matchDetailReturnOverlay ?? 'none')
+                  setSelectedMatch(null)
+                  setMatchDetailReturnOverlay(null)
                 }}
               />
             )}

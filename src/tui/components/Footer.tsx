@@ -12,7 +12,8 @@ interface FooterProps {
   scrollOffset: number;
   statusText?: string;
   digestCount?: number;
-  newsListOpen?: boolean;
+  matchCount?: number;
+  overlayOpen?: boolean;
   dimmed?: boolean;
 }
 
@@ -25,7 +26,8 @@ export function Footer({
   scrollOffset,
   statusText = "",
   digestCount = 0,
-  newsListOpen = false,
+  matchCount = 0,
+  overlayOpen = false,
   dimmed = false,
 }: FooterProps) {
   const { accent } = useTheme();
@@ -46,7 +48,7 @@ export function Footer({
             {scrollOffset} lines above{" "}
           </Text>
         ) : null}
-        {digestCount > 0 && !isLoading && newsListOpen ? (
+        {digestCount > 0 && !isLoading && overlayOpen ? (
           <>
             <Text color="gray" dimColor={dimmed}>
               enter
@@ -64,13 +66,38 @@ export function Footer({
             </Text>
           </>
         ) : null}
+        {matchCount > 0 && !isLoading && overlayOpen ? (
+          <>
+            <Text color="gray" dimColor={dimmed}>
+              enter/letra
+            </Text>
+            <Text color="white" dimColor={dimmed}>
+              {" "}
+              abrir{" "}
+            </Text>
+            <Text color="gray" dimColor={dimmed}>
+              esc
+            </Text>
+            <Text color="white" dimColor={dimmed}>
+              {" "}
+              cerrar{" "}
+            </Text>
+          </>
+        ) : null}
         <Text color="gray" dimColor={dimmed}>
           ctrl+x
         </Text>
-        <Text color="white" dimColor={dimmed}>
-          {" "}
-          ↓ noticias{" "}
-        </Text>
+        {matchCount > 0 && digestCount === 0 ? (
+          <Text color="white" dimColor={dimmed}>
+            {" "}
+            ↓ partidos{" "}
+          </Text>
+        ) : (
+          <Text color="white" dimColor={dimmed}>
+            {" "}
+            ↓ noticias{" "}
+          </Text>
+        )}
         <Text color="gray" dimColor={dimmed}>
           ctrl+p
         </Text>
