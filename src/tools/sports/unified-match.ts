@@ -19,28 +19,22 @@ function ttlForStatus(status: string): number {
   return 60 * 60
 }
 
-function mergeCaptains(
+function mergeFotmobPlayers(
   espnPlayers: UnifiedPlayer[],
   fotmobPlayers: UnifiedPlayer[] | undefined,
 ): UnifiedPlayer[] {
   if (!fotmobPlayers || fotmobPlayers.length === 0) return espnPlayers
 
-  const fotmobCaptainNames = new Set<string>()
+  const fotmobByName = new Map<string, UnifiedPlayer>()
   for (const fp of fotmobPlayers) {
-    if (fp.captain) {
-      fotmobCaptainNames.add(fp.name.toLowerCase().trim())
-    }
+    fotmobByName.set(fp.name.toLowerCase().trim(), fp)
   }
 
-  if (fotmobCaptainNames.size === 0) return espnPlayers
-
   return espnPlayers.map((ep) => {
-    if (ep.captain) return ep
     const key = ep.name.toLowerCase().trim()
-    if (fotmobCaptainNames.has(key)) {
-      return { ...ep, captain: true }
-    }
-    return ep
+    const fm = fotmobByName.get(key)
+    if (!fm) return ep
+    return { ...ep, captain: fm.captain || ep.captain, position: fm.position }
   })
 }
 
@@ -83,8 +77,8 @@ export async function getUnifiedMatchDetail(match: DigestMatch): Promise<MatchDe
       return data
     }
 
-    data.homePlayers = mergeCaptains(data.homePlayers, fotmobData.homePlayers)
-    data.awayPlayers = mergeCaptains(data.awayPlayers, fotmobData.awayPlayers)
+    data.homePlayers = mergeFotmobPlayers(data.homePlayers, fotmobData.homePlayers)
+    data.awayPlayers = mergeFotmobPlayers(data.awayPlayers, fotmobData.awayPlayers)
     data.homeCoach = fotmobData.homeCoach
     data.awayCoach = fotmobData.awayCoach
     data.homeFormation = fotmobData.homeFormation
