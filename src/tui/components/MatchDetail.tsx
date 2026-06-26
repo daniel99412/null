@@ -354,10 +354,10 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         firstHomeSub >= 0 ? firstHomeSub : Infinity,
         firstAwaySub >= 0 ? firstAwaySub : Infinity,
       )
-      const sepText = "─".repeat(Math.max(3, innerWidth - 6))
+      const sepLine = `  ${"─".repeat(sideWidth)}  ${"".padEnd(midWidth)}  ${"─".repeat(sideWidth)}`
       for (let i = 0; i < max; i++) {
         if (i === splitIdx) {
-          lines.push(`  ${sepText}`);
+          lines.push(sepLine);
         }
         const hp = detail.homePlayers[i];
         const ap = detail.awayPlayers[i];
@@ -585,10 +585,10 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
       firstHomeSub >= 0 ? firstHomeSub : Infinity,
       firstAwaySub >= 0 ? firstAwaySub : Infinity,
     )
-    const sepText = "─".repeat(Math.max(3, innerWidth - 6))
+    const sepLine = `  ${"─".repeat(sideWidth)}  ${"".padEnd(midWidth)}  ${"─".repeat(sideWidth)}`
     for (let i = 0; i < max; i++) {
       if (i === splitIdx) {
-        nodes.push(<Text key={nodes.length}>{`  ${sepText}`}</Text>)
+        nodes.push(<Text key={nodes.length}>{sepLine}</Text>)
       }
       const hp = detail.homePlayers[i];
       const ap = detail.awayPlayers[i];
