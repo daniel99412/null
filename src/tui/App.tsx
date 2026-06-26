@@ -515,29 +515,52 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
     }
 
     // Clear key sequences on any unrelated keypress
-    if (newsKeySequence === 'awaiting-down' && !key.downArrow && !(key.ctrl && char === 'x')) {
-      setNewsKeySequence('idle')
-    }
-    if (matchKeySequence === 'awaiting-down' && !key.downArrow && !(key.ctrl && char === 'x')) {
-      setMatchKeySequence('idle')
-    }
-
-    // Ctrl+X ↓ opens news list or match list
-    if (newsKeySequence === 'awaiting-down' && key.downArrow) {
-      setNewsKeySequence('idle')
-      if (!isLoading) {
-        if (digestArticles.length > 0) {
-          setOverlay('news-list')
-        } else if (digestMatches.length > 0) {
-          setOverlay('match-list')
+    if (newsKeySequence === 'awaiting-down') {
+      if (key.downArrow) {
+        setNewsKeySequence('idle')
+        if (!isLoading) {
+          if (digestArticles.length > 0) {
+            setOverlay('news-list')
+          } else if (digestMatches.length > 0) {
+            setOverlay('match-list')
+          }
         }
+        return
       }
-      return
+      if (!(key.ctrl && char === 'x')) {
+        setNewsKeySequence('idle')
+      }
+    }
+    if (matchKeySequence === 'awaiting-down') {
+      if (key.downArrow) {
+        setMatchKeySequence('idle')
+        if (!isLoading) {
+          if (digestMatches.length > 0) {
+            setOverlay('match-list')
+          } else if (digestArticles.length > 0) {
+            setOverlay('news-list')
+          }
+        }
+        return
+      }
+      if (!(key.ctrl && char === 'x')) {
+        setMatchKeySequence('idle')
+      }
     }
 
     if (!isLoading && (digestArticles.length > 0 || digestMatches.length > 0) && key.ctrl && char === 'x') {
-      setNewsKeySequence('awaiting-down')
-      setTimeout(() => setNewsKeySequence((prev) => prev === 'awaiting-down' ? 'idle' : prev), 2000)
+      const hasNews = digestArticles.length > 0
+      const hasMatches = digestMatches.length > 0
+      if (hasNews && hasMatches) {
+        setMatchKeySequence('awaiting-down')
+        setNewsKeySequence('idle')
+      } else if (hasNews) {
+        setNewsKeySequence('awaiting-down')
+        setMatchKeySequence('idle')
+      } else {
+        setMatchKeySequence('awaiting-down')
+        setNewsKeySequence('idle')
+      }
       return
     }
 
@@ -695,6 +718,17 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
 
         setStatusText('')
 
+        setDigestArticles(
+          agentResult.digestArticles && agentResult.digestArticles.length > 0
+            ? agentResult.digestArticles
+            : [],
+        )
+        setDigestMatches(
+          agentResult.digestMatches && agentResult.digestMatches.length > 0
+            ? agentResult.digestMatches
+            : [],
+        )
+
         // Direct response — no LLM needed (e.g. preference saved confirmation)
         if (agentResult.directResponse) {
           updateMessages((m) => {
@@ -704,16 +738,6 @@ function Chat({ resumeSessionId, onExit }: ChatProps) {
             return copy
           })
           buffer.current = agentResult.directResponse
-          if (agentResult.digestArticles && agentResult.digestArticles.length > 0) {
-            setDigestArticles(agentResult.digestArticles)
-          } else {
-            setDigestArticles([])
-          }
-          if (agentResult.digestMatches && agentResult.digestMatches.length > 0) {
-            setDigestMatches(agentResult.digestMatches)
-          } else {
-            setDigestMatches([])
-          }
           return
         }
 

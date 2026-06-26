@@ -84,20 +84,24 @@ export function Footer({
             </Text>
           </>
         ) : null}
-        <Text color="gray" dimColor={dimmed}>
-          ctrl+x
-        </Text>
-        {matchCount > 0 && digestCount === 0 ? (
-          <Text color="white" dimColor={dimmed}>
-            {" "}
-            ↓ partidos{" "}
-          </Text>
-        ) : (
-          <Text color="white" dimColor={dimmed}>
-            {" "}
-            ↓ noticias{" "}
-          </Text>
-        )}
+        {(digestCount > 0 || matchCount > 0) ? (
+          <>
+            <Text color="gray" dimColor={dimmed}>
+              ctrl+x
+            </Text>
+            {matchCount > 0 && digestCount === 0 ? (
+              <Text color="white" dimColor={dimmed}>
+                {" "}
+                ↓ partidos{" "}
+              </Text>
+            ) : (
+              <Text color="white" dimColor={dimmed}>
+                {" "}
+                ↓ noticias{" "}
+              </Text>
+            )}
+          </>
+        ) : null}
         <Text color="gray" dimColor={dimmed}>
           ctrl+p
         </Text>
