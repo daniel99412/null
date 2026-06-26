@@ -308,11 +308,11 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         const hForm = detail.homeFormation ? `[${detail.homeFormation}]` : "";
         const aForm = detail.awayFormation ? `[${detail.awayFormation}]` : "";
         lines.push(
-          `  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  DT: ${acName.padEnd(coachWidth - 4)}`,
+          `  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  ${`DT: ${acName}`.padStart(coachWidth)}`,
         );
         if (hForm || aForm) {
           lines.push(
-            `  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm}`,
+            `  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm.padStart(coachWidth)}`,
           );
         }
         lines.push("");
@@ -324,6 +324,21 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
       const homeActions = buildActionsMap(detail.events, detail.homeTeam)
       const awayActions = buildActionsMap(detail.events, detail.awayTeam)
 
+      const buildLine = (p: typeof detail.homePlayers[0], am: Map<string, string>, rev: boolean) => {
+        if (!p) return ""
+        const acts = (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "")
+        const posStr = p.position.padEnd(4)
+        if (rev) {
+          const actsStr = acts.padStart(3)
+          const namePad = p.name.slice(0, nameWidth).padStart(nameWidth)
+          const posPad = p.position.padStart(4)
+          const content = `${actsStr} ${posPad} ${namePad} ${p.jersey.padStart(2)}`
+          return content.padStart(sideWidth)
+        }
+        const actsStr = acts.padEnd(3)
+        return `${p.jersey.padStart(2)} ${p.name.slice(0, nameWidth).padEnd(nameWidth)} ${posStr} ${actsStr}`
+      }
+
       const max = Math.max(
         detail.homePlayers.length,
         detail.awayPlayers.length,
@@ -332,14 +347,8 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         const hp = detail.homePlayers[i];
         const ap = detail.awayPlayers[i];
 
-        const buildLine = (p: typeof hp, am: Map<string, string>) => {
-          if (!p) return ""
-          const acts = (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "")
-          return `${p.jersey.padStart(2)} ${p.name.slice(0, nameWidth).padEnd(nameWidth)} ${p.position.padEnd(4)} ${acts.padEnd(3)}`
-        }
-
         lines.push(
-          `  ${buildLine(hp, homeActions).padEnd(sideWidth)}  ${"".padEnd(midWidth)}  ${buildLine(ap, awayActions).padEnd(sideWidth)}`,
+          `  ${buildLine(hp, homeActions, false).padEnd(sideWidth)}  ${"".padEnd(midWidth)}  ${buildLine(ap, awayActions, true).padEnd(sideWidth)}`,
         );
       }
     }
@@ -519,11 +528,11 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
       const hForm = detail.homeFormation ? `[${detail.homeFormation}]` : "";
       const aForm = detail.awayFormation ? `[${detail.awayFormation}]` : "";
       nodes.push(
-        <Text key={nodes.length}>{`  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  DT: ${acName.padEnd(coachWidth - 4)}`}</Text>,
+        <Text key={nodes.length}>{`  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  ${`DT: ${acName}`.padStart(coachWidth)}`}</Text>,
       );
       if (hForm || aForm) {
         nodes.push(
-          <Text key={nodes.length}>{`  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm}`}</Text>,
+          <Text key={nodes.length}>{`  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm.padStart(coachWidth)}`}</Text>,
         );
       }
       nodes.push(<Text key={nodes.length}>{""}</Text>);
@@ -548,17 +557,42 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
       const hp = detail.homePlayers[i]
       const ap = detail.awayPlayers[i]
 
-      const buildLine = (p: typeof hp, am: Map<string, string>, w: number) => {
+      const buildLine = (p: typeof hp, am: Map<string, string>, w: number, rev: boolean) => {
         if (!p) return "".padEnd(w)
         const acts = (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "")
-        const prefix = `${p.jersey.padStart(2)} ${p.name.slice(0, nameWidth).padEnd(nameWidth)} ${p.position.padEnd(4)} `
-        return (
+        if (rev) {
+          const coloredActs = (
+            <Text>
+              {" ".repeat(Math.max(0, 4 - acts.length))}
+              {acts.split("").map((ch, j) => (
+                <Text key={j} color={actionColor(ch)}>{ch}</Text>
+              ))}
+            </Text>
+          )
+          const nameRaw = p.name.slice(0, nameWidth).padStart(nameWidth)
+          const posPad = p.position.padStart(4)
+          const tail = ` ${posPad} ${nameRaw} ${p.jersey.padStart(2)}`
+          const contentWidth = 4 + tail.length
+          const pad = Math.max(0, w - contentWidth)
+          return (
+            <Text>
+              {" ".repeat(pad)}{coloredActs}{tail}
+            </Text>
+          )
+        }
+        const coloredActs = (
           <Text>
-            {prefix}
             {acts.split("").map((ch, j) => (
               <Text key={j} color={actionColor(ch)}>{ch}</Text>
             ))}
             {" ".repeat(Math.max(0, 4 - acts.length))}
+          </Text>
+        )
+        const namePad = p.name.slice(0, nameWidth).padEnd(nameWidth)
+        return (
+          <Text>
+            {`${p.jersey.padStart(2)} ${namePad} ${p.position.padEnd(4)} `}
+            {coloredActs}
           </Text>
         )
       }
@@ -566,9 +600,9 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
       nodes.push(
         <Text key={nodes.length}>
           {`  `}
-          {buildLine(hp, homeActions, sideWidth)}
+          {buildLine(hp, homeActions, sideWidth, false)}
           {`  `}{" ".repeat(midWidth)}{`  `}
-          {buildLine(ap, awayActions, sideWidth)}
+          {buildLine(ap, awayActions, sideWidth, true)}
         </Text>,
       );
     }

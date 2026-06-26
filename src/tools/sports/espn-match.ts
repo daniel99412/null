@@ -135,7 +135,7 @@ export async function getMatchDetail(leaguePath: string, eventId: string): Promi
       return {
         jersey: stringValue(player['jersey'] ?? athlete['jersey']),
         name: stringValue(athlete['displayName']),
-        position: stringValue(pos['abbreviation'] ?? '').slice(0, 3),
+        position: stringValue(pos['abbreviation'] ?? '').slice(0, 3).replace(/-+$/, ''),
       }
     })
   }
