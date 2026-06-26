@@ -51,6 +51,10 @@ export async function getMatchDetail(leaguePath: string, eventId: string): Promi
   const away = asRecord(competitors.find((c) => asRecord(c)['homeAway'] === 'away'))
   const homeTeam = asRecord(home['team'])
   const awayTeam = asRecord(away['team'])
+  const homeColor = stringValue(homeTeam['color']) || undefined
+  const awayColor = stringValue(awayTeam['color']) || undefined
+  const homeAltColor = stringValue(homeTeam['alternateColor']) || undefined
+  const awayAltColor = stringValue(awayTeam['alternateColor']) || undefined
   const statusObj = asRecord(competition['status'])
   const statusType = asRecord(statusObj['type'])
   const statusDetail = stringValue(statusType['detail'] || statusObj['description'] || '')
@@ -86,7 +90,26 @@ export async function getMatchDetail(leaguePath: string, eventId: string): Promi
     const athlete = asRecord(firstParticipant['athlete'] ?? {})
     const playerName = stringValue(athlete['displayName'])
     const text = stringValue(ev['text'] || ev['shortText'])
-    const description = playerName && text ? text : (evType === 'Goal' ? `${playerName} ⚽` : text)
+    const description = playerName && text ? text : (evType === 'Goal' ? playerName : text)
+
+    let cardType: 'yellow' | 'red' | 'second_yellow' | undefined
+    if (type === 'card') {
+      const et = evType.toLowerCase()
+      if (et.includes('second') || et.includes('two')) cardType = 'second_yellow'
+      else if (et.includes('red')) cardType = 'red'
+      else cardType = 'yellow'
+    }
+
+    let subIn: string | undefined
+    let subOut: string | undefined
+    if (type === 'substitution') {
+      const subInParticipant = asRecord(participants[0] ?? {})
+      const subInAthlete = asRecord(subInParticipant['athlete'] ?? {})
+      subIn = stringValue(subInAthlete['displayName']) || undefined
+      const subOutParticipant = asRecord(participants[1] ?? {})
+      const subOutAthlete = asRecord(subOutParticipant['athlete'] ?? {})
+      subOut = stringValue(subOutAthlete['displayName']) || undefined
+    }
 
     return {
       time: stringValue(asRecord(ev['clock'])['displayValue']),
@@ -95,6 +118,10 @@ export async function getMatchDetail(leaguePath: string, eventId: string): Promi
       description,
       homeScore: numberValue(ev['homeScore']) || undefined,
       awayScore: numberValue(ev['awayScore']) || undefined,
+      cardType,
+      playerName: playerName || undefined,
+      subIn,
+      subOut,
     }
   })
 
@@ -149,6 +176,10 @@ export async function getMatchDetail(leaguePath: string, eventId: string): Promi
     date: stringValue(competition['date'] ?? data['date']).slice(0, 10),
     homeStats,
     awayStats,
+    homeColor,
+    awayColor,
+    homeAltColor,
+    awayAltColor,
     events,
     homePlayers: homeRoster,
     awayPlayers: awayRoster,

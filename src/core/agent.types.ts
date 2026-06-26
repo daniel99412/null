@@ -60,6 +60,10 @@ export interface MatchDetailData {
   tournament?: string
   venue?: string
   date: string
+  homeColor?: string
+  awayColor?: string
+  homeAltColor?: string
+  awayAltColor?: string
   homeStats: Array<{ label: string; value: string | number }>
   awayStats: Array<{ label: string; value: string | number }>
   events: Array<{
@@ -69,6 +73,10 @@ export interface MatchDetailData {
     description: string
     homeScore?: number
     awayScore?: number
+    cardType?: 'yellow' | 'red' | 'second_yellow'
+    playerName?: string
+    subIn?: string
+    subOut?: string
   }>
   homePlayers: Array<{ jersey: string; name: string; position: string }>
   awayPlayers: Array<{ jersey: string; name: string; position: string }>

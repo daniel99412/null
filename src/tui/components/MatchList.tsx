@@ -9,17 +9,6 @@ interface MatchListProps {
   onClose: () => void
 }
 
-function positionLabel(pos: number): string {
-  if (pos <= 0) return '?'
-  if (pos <= 26) {
-    return String.fromCharCode('a'.charCodeAt(0) + pos - 1)
-  }
-  const p = pos - 27
-  const first = Math.floor(p / 26)
-  const second = p % 26
-  return String.fromCharCode('a'.charCodeAt(0) + first) + String.fromCharCode('a'.charCodeAt(0) + second)
-}
-
 function truncate(value: string, max: number): string {
   if (value.length <= max) return value
   return value.slice(0, Math.max(0, max - 3)) + '...'
@@ -33,9 +22,21 @@ function formatDate(dateStr: string): string {
 }
 
 function statusBadge(game: DigestMatch): string {
-  if (game.status === 'in_progress') return '🔴 EN VIVO'
-  if (game.status === 'final') return '✅ FINAL'
+  if (game.status === 'in_progress') return 'EN VIVO'
+  if (game.status === 'final') return 'FINAL'
   return game.statusDetail || 'PROX'
+}
+
+function isToday(dateStr: string): boolean {
+  if (!dateStr) return false
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return false
+  const today = new Date()
+  return (
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate()
+  )
 }
 
 export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
@@ -79,15 +80,7 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
       return
     }
 
-    // a-z direct selection
-    if (char && /^[a-z]$/i.test(char)) {
-      const code = char.toLowerCase().charCodeAt(0)
-      const idx = code - 'a'.charCodeAt(0)
-      if (idx >= 0 && idx < matches.length) {
-        setSelectedIndex(idx)
-      }
-      return
-    }
+
   })
 
   const cols = process.stdout?.columns || 80
@@ -106,7 +99,6 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
   const visibleItems = matches.slice(windowStart, windowStart + actualMaxItems)
   const contentHeight = visibleItems.length * itemLines
 
-  const labelCharWidth = matches.length > 26 ? 2 : 1
   const hasMoreAbove = windowStart > 0
   const hasMoreBelow = windowStart + visibleItems.length < matches.length
   const scrollbarVisible = matches.length > maxVisibleItems
@@ -123,7 +115,7 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
       >
         <Box justifyContent="space-between" marginBottom={1}>
           <Text color={accent} bold>Partidos</Text>
-          <Text color="gray">{matches.length} partidos · a-z abrir</Text>
+          <Text color="gray">{matches.length} partidos</Text>
         </Box>
 
         <Box>
@@ -139,13 +131,14 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
             visibleItems.map((match, index) => {
               const actualIndex = windowStart + index
               const isSelected = actualIndex === selectedIndex
-              const label = positionLabel(actualIndex + 1)
               const score = match.status === 'scheduled'
                 ? 'vs'
                 : `${match.homeScore}-${match.awayScore}`
               const badge = statusBadge(match)
               const scrollbarWidth = scrollbarVisible ? 2 : 0
-              const teamWidth = Math.max(3, Math.floor((width - labelCharWidth - score.length - badge.length - 14 - scrollbarWidth) / 2))
+              const today = isToday(match.date)
+              const todayWidth = today ? 2 : 0
+              const teamWidth = Math.max(3, Math.floor((width - score.length - badge.length - 14 - scrollbarWidth - todayWidth) / 2))
 
               // Scrollbar thumb for this row
               let sb: string | null = null
@@ -158,17 +151,12 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
 
               return (
                 <Box key={`${match.eventId}-${match.position}`} paddingX={1}>
-                  <Box flexDirection="column" width={width - 4}>
-                    <Box>
-                      <Box width={labelCharWidth + 1} marginRight={1}>
-                        <Text
-                          color={isSelected ? accent : 'gray'}
-                          bold={isSelected}
-                        >
-                          {label.padStart(labelCharWidth)}.
-                        </Text>
-                      </Box>
-                      <Box flexGrow={1}>
+                    <Box flexDirection="column" width={width - 4}>
+                      <Box>
+                        <Box flexGrow={1}>
+                        {today && (
+                          <Text color="yellow" bold>! </Text>
+                        )}
                         <Text
                           color={isSelected ? accent : 'white'}
                           bold={isSelected}
@@ -189,7 +177,10 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
                         >
                           {truncate(match.awayTeam, teamWidth)}
                         </Text>
-                        <Text color={match.status === 'in_progress' ? 'red' : (isSelected ? accent : 'gray')} bold={match.status === 'in_progress'}>
+                        <Text
+                          color={match.status === 'in_progress' ? 'red' : match.status === 'final' ? 'green' : (isSelected ? accent : 'gray')}
+                          bold={match.status === 'in_progress' || match.status === 'final'}
+                        >
                           {' '}{badge}
                         </Text>
                       </Box>
@@ -200,7 +191,7 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
                       ) : null}
                     </Box>
                     <Text color="gray" dimColor={!isSelected}>
-                      {truncate(formatDate(match.date) + (match.venue ? ' · ' + match.venue : ''), width - labelCharWidth - 14 - scrollbarWidth)}
+                      {truncate(formatDate(match.date) + (match.venue ? ' · ' + match.venue : ''), width - 14 - scrollbarWidth)}
                     </Text>
                   </Box>
                 </Box>
@@ -214,10 +205,10 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
         </Box>
 
         <Box justifyContent="space-between">
-          <Text color="gray">enter/letra abrir  esc/q cerrar</Text>
+          <Text color="gray">enter abrir · esc/q cerrar</Text>
           <Box>
             {hasMoreAbove ? <Text color="gray">↑{windowStart} </Text> : null}
-            <Text color="gray">{positionLabel(selectedIndex + 1)}/{matches.length}</Text>
+            <Text color="gray">{selectedIndex + 1}/{matches.length}</Text>
             {hasMoreBelow ? <Text color="gray"> ↓{matches.length - windowStart - visibleItems.length}</Text> : null}
           </Box>
         </Box>
