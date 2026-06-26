@@ -86,7 +86,7 @@ export function runCLI(): void {
   // Clean caches command
   program
     .command('clean')
-    .description('Clear all cached data (search and news)')
+    .description('Clear all cached data (search, news, sports)')
     .action(() => {
       const deleted = cleanCaches()
       console.log(`Cleared ${deleted} cached entries.`)

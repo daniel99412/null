@@ -1,6 +1,7 @@
 import { getDb } from '../../memory/database.js'
 import type { UnifiedPlayer, Coach, InjuredPlayer, H2hMatch } from '../../core/sports.types.js'
 import { mapPosition } from '../../core/sports.types.js'
+import { debugLog } from '../../utils/debug.js'
 
 const FOTMOB_BASE = 'https://www.fotmob.com'
 
@@ -60,7 +61,35 @@ function getFotmobLeagueId(espnLeaguePath: string): string | null {
 }
 
 function normalizeTeamName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '').trim()
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim()
+}
+
+function resolveTeamId(name: string): string | null {
+  try {
+    const db = getDb()
+    const normalized = name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .trim()
+    const row = db.prepare(`
+      SELECT entity_id FROM sports_aliases
+      WHERE REPLACE(LOWER(alias), 'ü', 'u') = ? AND entity_type = 'team'
+      UNION
+      SELECT id FROM teams
+      WHERE REPLACE(LOWER(name), 'ü', 'u') = ?
+      LIMIT 1
+    `).get(normalized, normalized) as { entity_id: string } | undefined
+    return row?.entity_id ?? null
+  } catch {
+    return null
+  }
 }
 
 function formatDate(dateStr: string): string {
@@ -74,15 +103,24 @@ function formatDate(dateStr: string): string {
 
 const LEAGUE_SLUGS: Record<string, string> = {
   '10160': 'liga-mx',
+  '10299': 'liga-expansion-mx',
+  '10029': 'copa-mx',
   '47': 'premier-league',
   '87': 'laliga',
   '54': 'bundesliga',
   '55': 'serie-a',
   '53': 'ligue-1',
   '42': 'champions-league',
+  '44': 'europa-league',
+  '73': 'eredivisie',
+  '63': 'primeira-liga',
   '130': 'mls',
   '384': 'copa-libertadores',
   '77': 'world-cup',
+  '145': 'copa-america',
+  '122': 'africa-cup-of-nations',
+  '136': 'asian-cup',
+  '75': 'concacaf-gold-cup',
 }
 
 function getLeagueSlug(fotmobLeagueId: string): string | null {
@@ -99,26 +137,33 @@ interface FotmobFixture {
 
 async function getLeagueFixtures(fotmobLeagueId: string): Promise<FotmobFixture[]> {
   const slug = getLeagueSlug(fotmobLeagueId)
-  if (!slug) return []
+  const urls: string[] = []
+  if (slug) urls.push(`${FOTMOB_BASE}/leagues/${fotmobLeagueId}/overview/${slug}`)
+  urls.push(`${FOTMOB_BASE}/leagues/${fotmobLeagueId}/overview`)
 
-  try {
-    const pageData = await fetchPage(`${FOTMOB_BASE}/leagues/${fotmobLeagueId}/overview/${slug}`)
-    const props = asRecord(asRecord(pageData['props'])['pageProps'])
-    const fixtures = asRecord(props['fixtures'])
-    const allMatches = asArray(fixtures['allMatches'])
-    return allMatches.map((m) => {
-      const fixture = asRecord(m)
-      return {
-        pageUrl: stringValue(fixture['pageUrl']),
-        id: stringValue(fixture['id']),
-        home: { name: stringValue(asRecord(fixture['home'])['name']) },
-        away: { name: stringValue(asRecord(fixture['away'])['name']) },
-        status: asRecord(fixture['status']),
+  for (const url of urls) {
+    try {
+      const pageData = await fetchPage(url)
+      const props = asRecord(asRecord(pageData['props'])['pageProps'])
+      const fixtures = asRecord(props['fixtures'])
+      const allMatches = asArray(fixtures['allMatches'])
+      if (allMatches.length > 0) {
+        return allMatches.map((m) => {
+          const fixture = asRecord(m)
+          return {
+            pageUrl: stringValue(fixture['pageUrl']),
+            id: stringValue(fixture['id']),
+            home: { name: stringValue(asRecord(fixture['home'])['name']) },
+            away: { name: stringValue(asRecord(fixture['away'])['name']) },
+            status: asRecord(fixture['status']),
+          }
+        })
       }
-    })
-  } catch {
-    return []
+    } catch { /* try next URL */ }
   }
+
+  debugLog(`[fotmob] no fixtures for league ${fotmobLeagueId} (slug: ${slug ?? 'none'})`)
+  return []
 }
 
 export async function findFotmobMatchUrl(
@@ -128,30 +173,42 @@ export async function findFotmobMatchUrl(
   espnLeaguePath: string,
 ): Promise<string | null> {
   const fotmobLeagueId = getFotmobLeagueId(espnLeaguePath)
-  if (!fotmobLeagueId) return null
+  if (!fotmobLeagueId) {
+    debugLog(`[fotmob] no league mapping for ${espnLeaguePath}`)
+    return null
+  }
 
   const fixtures = await getLeagueFixtures(fotmobLeagueId)
-  if (fixtures.length === 0) return null
+  if (fixtures.length === 0) {
+    debugLog(`[fotmob] no fixtures found for league ${fotmobLeagueId}`)
+    return null
+  }
 
   const homeNorm = normalizeTeamName(homeTeam)
   const awayNorm = normalizeTeamName(awayTeam)
   const dateStr = formatDate(date)
 
+  const teamsMatch = (a: string, b: string) => {
+    if (normalizeTeamName(a) === normalizeTeamName(b)) return true
+    const idA = resolveTeamId(a)
+    const idB = resolveTeamId(b)
+    return !!idA && !!idB && idA === idB
+  }
+
   for (const f of fixtures) {
-    const fHome = normalizeTeamName(f.home.name)
-    const fAway = normalizeTeamName(f.away.name)
-    const matchOk = (fHome === homeNorm && fAway === awayNorm) ||
-      (fHome === awayNorm && fAway === homeNorm)
+    const matchOk = (teamsMatch(homeTeam, f.home.name) && teamsMatch(awayTeam, f.away.name)) ||
+      (teamsMatch(homeTeam, f.away.name) && teamsMatch(awayTeam, f.home.name))
     if (!matchOk) continue
     if (dateStr) {
       const fTime = stringValue(f.status['utcTime'] ?? f.status['time'] ?? '').slice(0, 10)
-      if (!fTime) continue
+      if (fTime && fTime !== dateStr) continue
     }
     const base = f.pageUrl.split('#')[0]
     if (base) return base
     return `/matches/${f.home.name.toLowerCase().replace(/\s+/g, '-')}-vs-${f.away.name.toLowerCase().replace(/\s+/g, '-')}/${f.id}`
   }
 
+  debugLog(`[fotmob] no match found for ${homeTeam} vs ${awayTeam} on ${date}`)
   return null
 }
 
@@ -165,6 +222,7 @@ function parsePlayers(players: unknown[]): UnifiedPlayer[] {
       jersey: stringValue(player['shirtNumber']),
       name: stringValue(player['name']),
       position: mapPosition(posId),
+      captain: player['captain'] === true,
     }
   })
 }
@@ -248,9 +306,12 @@ export async function getFotmobMatchData(pageUrl: string): Promise<FotmobMatchDa
     const pageData = await fetchPage(`${FOTMOB_BASE}${pageUrl}`)
     const props = asRecord(asRecord(pageData['props'])['pageProps'])
     const content = asRecord(props['content'])
-    const lineup = asRecord(content['lineup'])
+    const lineup = asRecord(content['lineup'] ?? props['lineup'])
 
-    if (!lineup['matchId']) return null
+    if (!lineup['matchId']) {
+      debugLog(`[fotmob] no lineup on match page ${pageUrl}`)
+      return null
+    }
 
     const homeTeam = asRecord(lineup['homeTeam'])
     const awayTeam = asRecord(lineup['awayTeam'])
@@ -262,6 +323,8 @@ export async function getFotmobMatchData(pageUrl: string): Promise<FotmobMatchDa
 
     const homePlayers = [...parsePlayers(homeStarters), ...parsePlayers(homeSubs)]
     const awayPlayers = [...parsePlayers(awayStarters), ...parsePlayers(awaySubs)]
+
+    debugLog(`[fotmob] lineup: ${homePlayers.length} home, ${awayPlayers.length} away players`)
 
     const h2hResult = parseH2H(content['h2h'])
 

@@ -59,7 +59,7 @@ const COMMANDS: CommandItem[] = [
   { id: 'sessions', label: 'Sessions', description: 'Browse and resume previous sessions', shortcut: '' },
   { id: 'theme', label: 'Theme', description: 'Change the accent color of the UI', shortcut: '' },
   { id: 'clear', label: 'Clear Messages', description: 'Clear the current chat display', shortcut: '' },
-  { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search and news)', shortcut: '' },
+  { id: 'clean-caches', label: 'Clean Caches', description: 'Clear cached data (search, news, sports)', shortcut: '' },
   { id: 'tools', label: 'Tools', description: 'List all available tools', shortcut: '/' },
   { id: 'keybindings', label: 'Keybindings', description: 'Show available keyboard shortcuts', shortcut: 'ctrl+h' },
   { id: 'exit', label: 'Exit', description: 'Close null CLI', shortcut: 'ctrl+c' },

@@ -114,6 +114,37 @@ function formatOtherColor(text: string): string {
   return "gray";
 }
 
+function buildActionsMap(
+  events: MatchDetailData["events"],
+  teamName: string,
+): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const ev of events) {
+    if (ev.team !== teamName) continue
+    if (ev.type === "card" && ev.playerName) {
+      const key = ev.playerName.toLowerCase().trim()
+      if (ev.cardType === "red") {
+        map.set(key, (map.get(key) ?? "") + "R")
+      } else if (ev.cardType === "second_yellow") {
+        map.set(key, (map.get(key) ?? "") + "!!")
+      } else {
+        map.set(key, (map.get(key) ?? "") + "!")
+      }
+    }
+    if (ev.type === "substitution") {
+      if (ev.subOut) {
+        const key = ev.subOut.toLowerCase().trim()
+        map.set(key, (map.get(key) ?? "") + "↓")
+      }
+      if (ev.subIn) {
+        const key = ev.subIn.toLowerCase().trim()
+        map.set(key, (map.get(key) ?? "") + "↑")
+      }
+    }
+  }
+  return map
+}
+
 function fmt(v: string | number): string {
   if (typeof v === "number") return String(v);
   const n = Number.parseFloat(v);
@@ -287,7 +318,12 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         lines.push("");
       }
 
-      const colWidth = Math.max(12, Math.floor((innerWidth - 6) / 3));
+      const sideWidth = Math.max(12, Math.floor((innerWidth - 6) * 0.28))
+      const midWidth = innerWidth - 6 - 2 * sideWidth
+      const nameWidth = sideWidth - 12
+      const homeActions = buildActionsMap(detail.events, detail.homeTeam)
+      const awayActions = buildActionsMap(detail.events, detail.awayTeam)
+
       const max = Math.max(
         detail.homePlayers.length,
         detail.awayPlayers.length,
@@ -295,14 +331,15 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
       for (let i = 0; i < max; i++) {
         const hp = detail.homePlayers[i];
         const ap = detail.awayPlayers[i];
-        const hc = hp
-          ? `${hp.jersey.padStart(2)} ${hp.name.padEnd(colWidth - 11)} ${hp.position.padEnd(4)}${hp.captain ? " C" : "  "}`
-          : "";
-        const ac = ap
-          ? `${ap.jersey.padStart(2)} ${ap.name.padEnd(colWidth - 11)} ${ap.position.padEnd(4)}${ap.captain ? " C" : "  "}`
-          : "";
+
+        const buildLine = (p: typeof hp, am: Map<string, string>) => {
+          if (!p) return ""
+          const acts = (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "")
+          return `${p.jersey.padStart(2)} ${p.name.slice(0, nameWidth).padEnd(nameWidth)} ${p.position.padEnd(4)} ${acts.padEnd(3)}`
+        }
+
         lines.push(
-          `  ${hc.padEnd(colWidth)}  ${"".padEnd(colWidth)}  ${ac.padEnd(colWidth)}`,
+          `  ${buildLine(hp, homeActions).padEnd(sideWidth)}  ${"".padEnd(midWidth)}  ${buildLine(ap, awayActions).padEnd(sideWidth)}`,
         );
       }
     }
@@ -465,6 +502,80 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
     return nodes;
   }, [detail, status, innerWidth]);
 
+  const lineupNodes = useMemo(() => {
+    if (status !== "ready" || !detail) return [];
+
+    const nodes: React.ReactNode[] = [];
+
+    if (
+      detail.homeCoach ||
+      detail.awayCoach ||
+      detail.homeFormation ||
+      detail.awayFormation
+    ) {
+      const coachWidth = Math.max(20, Math.floor((innerWidth - 6) / 3));
+      const hcName = detail.homeCoach?.name ?? "";
+      const acName = detail.awayCoach?.name ?? "";
+      const hForm = detail.homeFormation ? `[${detail.homeFormation}]` : "";
+      const aForm = detail.awayFormation ? `[${detail.awayFormation}]` : "";
+      nodes.push(
+        <Text key={nodes.length}>{`  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  DT: ${acName.padEnd(coachWidth - 4)}`}</Text>,
+      );
+      if (hForm || aForm) {
+        nodes.push(
+          <Text key={nodes.length}>{`  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm}`}</Text>,
+        );
+      }
+      nodes.push(<Text key={nodes.length}>{""}</Text>);
+    }
+
+    const sideWidth = Math.max(12, Math.floor((innerWidth - 6) * 0.28))
+    const midWidth = innerWidth - 6 - 2 * sideWidth
+    const nameWidth = sideWidth - 13
+    const homeActions = buildActionsMap(detail.events, detail.homeTeam)
+    const awayActions = buildActionsMap(detail.events, detail.awayTeam)
+
+    const actionColor = (ch: string) =>
+      ch === "C" ? "cyan" :
+      ch === "↓" ? "red" :
+      ch === "↑" ? "green" :
+      ch === "!" ? "yellow" :
+      ch === "R" ? "red" :
+      ch === "Y" ? "yellow" : "white"
+
+    const max = Math.max(detail.homePlayers.length, detail.awayPlayers.length)
+    for (let i = 0; i < max; i++) {
+      const hp = detail.homePlayers[i]
+      const ap = detail.awayPlayers[i]
+
+      const buildLine = (p: typeof hp, am: Map<string, string>, w: number) => {
+        if (!p) return "".padEnd(w)
+        const acts = (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "")
+        const prefix = `${p.jersey.padStart(2)} ${p.name.slice(0, nameWidth).padEnd(nameWidth)} ${p.position.padEnd(4)} `
+        return (
+          <Text>
+            {prefix}
+            {acts.split("").map((ch, j) => (
+              <Text key={j} color={actionColor(ch)}>{ch}</Text>
+            ))}
+            {" ".repeat(Math.max(0, 4 - acts.length))}
+          </Text>
+        )
+      }
+
+      nodes.push(
+        <Text key={nodes.length}>
+          {`  `}
+          {buildLine(hp, homeActions, sideWidth)}
+          {`  `}{" ".repeat(midWidth)}{`  `}
+          {buildLine(ap, awayActions, sideWidth)}
+        </Text>,
+      );
+    }
+
+    return nodes;
+  }, [detail, status, innerWidth]);
+
   const {
     scrollOffset,
     visibleLines,
@@ -614,7 +725,10 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
           {status === "ready" &&
             section === "events" &&
             eventNodes.slice(scrollOffset, scrollOffset + visibleHeight)}
-          {status === "ready" && section !== "events" && (
+          {status === "ready" &&
+            section === "lineups" &&
+            lineupNodes.slice(scrollOffset, scrollOffset + visibleHeight)}
+          {status === "ready" && section !== "events" && section !== "lineups" && (
             <Text color="white" wrap="wrap">
               {visibleLines.join("\n")}
             </Text>
