@@ -8,6 +8,7 @@ export interface UnifiedPlayer {
   name: string
   position: string
   captain?: boolean
+  sub?: boolean
 }
 
 export interface Coach {

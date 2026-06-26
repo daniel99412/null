@@ -34,7 +34,7 @@ function mergeFotmobPlayers(
     const key = ep.name.toLowerCase().trim()
     const fm = fotmobByName.get(key)
     if (!fm) return ep
-    return { ...ep, captain: fm.captain || ep.captain, position: fm.position }
+    return { ...ep, captain: fm.captain || ep.captain, position: fm.position, sub: fm.sub }
   })
 }
 

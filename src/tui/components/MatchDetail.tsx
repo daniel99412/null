@@ -118,31 +118,31 @@ function buildActionsMap(
   events: MatchDetailData["events"],
   teamName: string,
 ): Map<string, string> {
-  const map = new Map<string, string>()
+  const map = new Map<string, string>();
   for (const ev of events) {
-    if (ev.team !== teamName) continue
+    if (ev.team !== teamName) continue;
     if (ev.type === "card" && ev.playerName) {
-      const key = ev.playerName.toLowerCase().trim()
+      const key = ev.playerName.toLowerCase().trim();
       if (ev.cardType === "red") {
-        map.set(key, (map.get(key) ?? "") + "R")
+        map.set(key, (map.get(key) ?? "") + "R");
       } else if (ev.cardType === "second_yellow") {
-        map.set(key, (map.get(key) ?? "") + "!!")
+        map.set(key, (map.get(key) ?? "") + "!!");
       } else {
-        map.set(key, (map.get(key) ?? "") + "!")
+        map.set(key, (map.get(key) ?? "") + "!");
       }
     }
     if (ev.type === "substitution") {
       if (ev.subOut) {
-        const key = ev.subOut.toLowerCase().trim()
-        map.set(key, (map.get(key) ?? "") + "↓")
+        const key = ev.subOut.toLowerCase().trim();
+        map.set(key, (map.get(key) ?? "") + "↓");
       }
       if (ev.subIn) {
-        const key = ev.subIn.toLowerCase().trim()
-        map.set(key, (map.get(key) ?? "") + "↑")
+        const key = ev.subIn.toLowerCase().trim();
+        map.set(key, (map.get(key) ?? "") + "↑");
       }
     }
   }
-  return map
+  return map;
 }
 
 function fmt(v: string | number): string {
@@ -267,14 +267,14 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         awayRaw: extractNum(detail.awayStats[i]?.value ?? 0),
       }));
 
-      const maxLabel = show.reduce((m, s) => Math.max(m, labelOf(s.label).length), 0)
-      const labelWidth = Math.max(6, maxLabel + 1)
+      const maxLabel = show.reduce(
+        (m, s) => Math.max(m, labelOf(s.label).length),
+        0,
+      );
+      const labelWidth = Math.max(6, maxLabel + 1);
       const dataColWidth = Math.max(
         6,
-        Math.min(
-          20,
-          Math.floor((innerWidth - labelWidth - 6) / 3),
-        ),
+        Math.min(20, Math.floor((innerWidth - labelWidth - 6) / 3)),
       );
       const barWidth = Math.max(4, dataColWidth - 4);
 
@@ -318,32 +318,47 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         lines.push("");
       }
 
-      const sideWidth = Math.max(12, Math.floor((innerWidth - 6) * 0.28))
-      const midWidth = innerWidth - 6 - 2 * sideWidth
-      const nameWidth = sideWidth - 12
-      const homeActions = buildActionsMap(detail.events, detail.homeTeam)
-      const awayActions = buildActionsMap(detail.events, detail.awayTeam)
+      const sideWidth = Math.max(12, Math.floor((innerWidth - 6) * 0.28));
+      const midWidth = innerWidth - 6 - 2 * sideWidth;
+      const nameWidth = sideWidth - 12;
+      const homeActions = buildActionsMap(detail.events, detail.homeTeam);
+      const awayActions = buildActionsMap(detail.events, detail.awayTeam);
 
-      const buildLine = (p: typeof detail.homePlayers[0], am: Map<string, string>, rev: boolean) => {
-        if (!p) return ""
-        const acts = (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "")
-        const posStr = p.position.padEnd(4)
+      const buildLine = (
+        p: (typeof detail.homePlayers)[0],
+        am: Map<string, string>,
+        rev: boolean,
+      ) => {
+        if (!p) return "";
+        const acts =
+          (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "");
+        const posStr = p.position.padEnd(4);
         if (rev) {
-          const actsStr = acts.padStart(3)
-          const namePad = p.name.slice(0, nameWidth).padStart(nameWidth)
-          const posPad = p.position.padStart(4)
-          const content = `${actsStr} ${posPad} ${namePad} ${p.jersey.padStart(2)}`
-          return content.padStart(sideWidth)
+          const actsStr = acts.padStart(3);
+          const namePad = p.name.slice(0, nameWidth).padStart(nameWidth);
+          const posPad = p.position.padStart(4);
+          const content = `${actsStr} ${posPad} ${namePad} ${p.jersey.padStart(2)}`;
+          return content.padStart(sideWidth);
         }
-        const actsStr = acts.padEnd(3)
-        return `${p.jersey.padStart(2)} ${p.name.slice(0, nameWidth).padEnd(nameWidth)} ${posStr} ${actsStr}`
-      }
+        const actsStr = acts.padEnd(3);
+        return `${p.jersey.padStart(2)} ${p.name.slice(0, nameWidth).padEnd(nameWidth)} ${posStr} ${actsStr}`;
+      };
 
       const max = Math.max(
         detail.homePlayers.length,
         detail.awayPlayers.length,
       );
+      const firstHomeSub = detail.homePlayers.findIndex(p => p.sub)
+      const firstAwaySub = detail.awayPlayers.findIndex(p => p.sub)
+      const splitIdx = Math.min(
+        firstHomeSub >= 0 ? firstHomeSub : Infinity,
+        firstAwaySub >= 0 ? firstAwaySub : Infinity,
+      )
+      const sepText = "─".repeat(Math.max(3, innerWidth - 6))
       for (let i = 0; i < max; i++) {
+        if (i === splitIdx) {
+          lines.push(`  ${sepText}`);
+        }
         const hp = detail.homePlayers[i];
         const ap = detail.awayPlayers[i];
 
@@ -448,9 +463,7 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
               {`  ${time.padEnd(timeWidth)} `}
               <Text color="yellow">2TA</Text>
               {` `}
-              <Text color="yellow">!!</Text>
-              {" "}
-              <Text color="red">R</Text>
+              <Text color="yellow">!!</Text> <Text color="red">R</Text>
               {` ${player.slice(0, descWidth - 6)}`}
             </Text>,
           );
@@ -502,7 +515,9 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         const color = formatOtherColor(ev.description);
         nodes.push(
           <Text key={k++}>
-            <Text color={color}>{`  ${time.padEnd(timeWidth)} ${label.padEnd(typeWidth)} ${ev.description.slice(0, descWidth)}`}</Text>
+            <Text
+              color={color}
+            >{`  ${time.padEnd(timeWidth)} ${label.padEnd(typeWidth)} ${ev.description.slice(0, descWidth)}`}</Text>
           </Text>,
         );
       }
@@ -528,80 +543,115 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
       const hForm = detail.homeFormation ? `[${detail.homeFormation}]` : "";
       const aForm = detail.awayFormation ? `[${detail.awayFormation}]` : "";
       nodes.push(
-        <Text key={nodes.length}>{`  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  ${`DT: ${acName}`.padStart(coachWidth)}`}</Text>,
+        <Text
+          key={nodes.length}
+        >{`  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  ${`DT: ${acName}`.padStart(coachWidth)}`}</Text>,
       );
       if (hForm || aForm) {
         nodes.push(
-          <Text key={nodes.length}>{`  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm.padStart(coachWidth)}`}</Text>,
+          <Text
+            key={nodes.length}
+          >{`  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm.padStart(coachWidth)}`}</Text>,
         );
       }
       nodes.push(<Text key={nodes.length}>{""}</Text>);
     }
 
-    const sideWidth = Math.max(12, Math.floor((innerWidth - 6) * 0.28))
-    const midWidth = innerWidth - 6 - 2 * sideWidth
-    const nameWidth = sideWidth - 13
-    const homeActions = buildActionsMap(detail.events, detail.homeTeam)
-    const awayActions = buildActionsMap(detail.events, detail.awayTeam)
+    const sideWidth = Math.max(12, Math.floor((innerWidth - 6) * 0.28));
+    const midWidth = innerWidth - 6 - 2 * sideWidth;
+    const nameWidth = sideWidth - 13;
+    const homeActions = buildActionsMap(detail.events, detail.homeTeam);
+    const awayActions = buildActionsMap(detail.events, detail.awayTeam);
 
     const actionColor = (ch: string) =>
-      ch === "C" ? "cyan" :
-      ch === "↓" ? "red" :
-      ch === "↑" ? "green" :
-      ch === "!" ? "yellow" :
-      ch === "R" ? "red" :
-      ch === "Y" ? "yellow" : "white"
+      ch === "C"
+        ? "cyan"
+        : ch === "↓"
+          ? "red"
+          : ch === "↑"
+            ? "green"
+            : ch === "!"
+              ? "yellow"
+              : ch === "R"
+                ? "red"
+                : ch === "Y"
+                  ? "yellow"
+                  : "white";
 
-    const max = Math.max(detail.homePlayers.length, detail.awayPlayers.length)
+    const max = Math.max(detail.homePlayers.length, detail.awayPlayers.length);
+    const firstHomeSub = detail.homePlayers.findIndex(p => p.sub)
+    const firstAwaySub = detail.awayPlayers.findIndex(p => p.sub)
+    const splitIdx = Math.min(
+      firstHomeSub >= 0 ? firstHomeSub : Infinity,
+      firstAwaySub >= 0 ? firstAwaySub : Infinity,
+    )
+    const sepText = "─".repeat(Math.max(3, innerWidth - 6))
     for (let i = 0; i < max; i++) {
-      const hp = detail.homePlayers[i]
-      const ap = detail.awayPlayers[i]
+      if (i === splitIdx) {
+        nodes.push(<Text key={nodes.length}>{`  ${sepText}`}</Text>)
+      }
+      const hp = detail.homePlayers[i];
+      const ap = detail.awayPlayers[i];
 
-      const buildLine = (p: typeof hp, am: Map<string, string>, w: number, rev: boolean) => {
-        if (!p) return "".padEnd(w)
-        const acts = (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "")
+      const buildLine = (
+        p: typeof hp,
+        am: Map<string, string>,
+        w: number,
+        rev: boolean,
+      ) => {
+        if (!p) return "".padEnd(w);
+        const acts =
+          (p.captain ? "C" : "") + (am.get(p.name.toLowerCase().trim()) ?? "");
         if (rev) {
           const coloredActs = (
             <Text>
               {" ".repeat(Math.max(0, 4 - acts.length))}
               {acts.split("").map((ch, j) => (
-                <Text key={j} color={actionColor(ch)}>{ch}</Text>
+                <Text key={j} color={actionColor(ch)}>
+                  {ch}
+                </Text>
               ))}
             </Text>
-          )
-          const nameRaw = p.name.slice(0, nameWidth).padStart(nameWidth)
-          const posPad = p.position.padStart(4)
-          const tail = ` ${posPad} ${nameRaw} ${p.jersey.padStart(2)}`
-          const contentWidth = 4 + tail.length
-          const pad = Math.max(0, w - contentWidth)
+          );
+          const nameRaw = p.name.slice(0, nameWidth).padStart(nameWidth);
+          const posPad = p.position.padStart(4);
+          const tail = ` ${posPad} ${nameRaw} ${p.jersey.padStart(2)}`;
+          const contentWidth = 4 + tail.length;
+          const pad = Math.max(0, w - contentWidth);
           return (
             <Text>
-              {" ".repeat(pad)}{coloredActs}{tail}
+              {" ".repeat(pad)}
+              {coloredActs}
+              {tail}
             </Text>
-          )
+          );
         }
         const coloredActs = (
           <Text>
             {acts.split("").map((ch, j) => (
-              <Text key={j} color={actionColor(ch)}>{ch}</Text>
+              <Text key={j} color={actionColor(ch)}>
+                {ch}
+              </Text>
             ))}
             {" ".repeat(Math.max(0, 4 - acts.length))}
           </Text>
-        )
-        const namePad = p.name.slice(0, nameWidth).padEnd(nameWidth)
+        );
+        const namePad = p.name.slice(0, nameWidth).padEnd(nameWidth);
         return (
           <Text>
             {`${p.jersey.padStart(2)} ${namePad} ${p.position.padEnd(4)} `}
             {coloredActs}
           </Text>
-        )
-      }
+        );
+      };
 
       nodes.push(
         <Text key={nodes.length}>
           {`  `}
           {buildLine(hp, homeActions, sideWidth, false)}
-          {`  `}{" ".repeat(midWidth)}{`  `}
+          {`  `}
+          {" ".repeat(midWidth)}
+          {`  `}
           {buildLine(ap, awayActions, sideWidth, true)}
         </Text>,
       );
@@ -747,7 +797,7 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
               </Box>
             );
           })}
-          <Text color="gray"> [1-4] sección{scrollInfo}</Text>
+          <Text color="gray"> [1-5] sección{scrollInfo}</Text>
         </Box>
 
         {/* Content */}
@@ -762,11 +812,13 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
           {status === "ready" &&
             section === "lineups" &&
             lineupNodes.slice(scrollOffset, scrollOffset + visibleHeight)}
-          {status === "ready" && section !== "events" && section !== "lineups" && (
-            <Text color="white" wrap="wrap">
-              {visibleLines.join("\n")}
-            </Text>
-          )}
+          {status === "ready" &&
+            section !== "events" &&
+            section !== "lineups" && (
+              <Text color="white" wrap="wrap">
+                {visibleLines.join("\n")}
+              </Text>
+            )}
         </Box>
       </Box>
     </Box>

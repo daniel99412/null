@@ -214,7 +214,7 @@ export async function findFotmobMatchUrl(
 
 // ── Parse FotMob lineup players ──────────────────────────────────────
 
-function parsePlayers(players: unknown[]): UnifiedPlayer[] {
+function parsePlayers(players: unknown[], isSub = false): UnifiedPlayer[] {
   return players.map((p) => {
     const player = asRecord(p)
     const posId = numberValue(player['positionId'])
@@ -223,6 +223,7 @@ function parsePlayers(players: unknown[]): UnifiedPlayer[] {
       name: stringValue(player['name']),
       position: mapPosition(posId),
       captain: player['captain'] === true,
+      sub: isSub,
     }
   })
 }
@@ -321,8 +322,8 @@ export async function getFotmobMatchData(pageUrl: string): Promise<FotmobMatchDa
     const homeSubs = asArray(homeTeam['subs'])
     const awaySubs = asArray(awayTeam['subs'])
 
-    const homePlayers = [...parsePlayers(homeStarters), ...parsePlayers(homeSubs)]
-    const awayPlayers = [...parsePlayers(awayStarters), ...parsePlayers(awaySubs)]
+    const homePlayers = [...parsePlayers(homeStarters, false), ...parsePlayers(homeSubs, true)]
+    const awayPlayers = [...parsePlayers(awayStarters, false), ...parsePlayers(awaySubs, true)]
 
     debugLog(`[fotmob] lineup: ${homePlayers.length} home, ${awayPlayers.length} away players`)
 
