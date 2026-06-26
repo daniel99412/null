@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import { useTheme } from "../context/ThemeContext.js";
 import { useScroll } from "../hooks/useScroll.js";
-import { getMatchDetail } from "../../tools/sports/espn-match.js";
+import { getUnifiedMatchDetail } from "../../tools/sports/unified-match.js";
 import type { DigestMatch, MatchDetailData } from "../../core/agent.types.js";
 
 interface MatchDetailProps {
@@ -11,7 +11,7 @@ interface MatchDetailProps {
 }
 
 type LoadStatus = "loading" | "ready" | "error";
-type DetailSection = "stats" | "events" | "lineups" | "h2h";
+type DetailSection = "stats" | "events" | "lineups" | "h2h" | "injuries";
 
 function isBlack(hex: string): boolean {
   return hex === "000000";
@@ -66,18 +66,52 @@ function pickColor(primary?: string, alternate?: string): string {
   return "white";
 }
 
-function positionLabel(pos: number): string {
-  if (pos <= 0) return "?";
-  if (pos <= 26) {
-    return String.fromCharCode("a".charCodeAt(0) + pos - 1);
-  }
-  const p = pos - 27;
-  const first = Math.floor(p / 26);
-  const second = p % 26;
+function isMatchStart(text: string): boolean {
+  const t = text.toLowerCase();
   return (
-    String.fromCharCode("a".charCodeAt(0) + first) +
-    String.fromCharCode("a".charCodeAt(0) + second)
+    t.includes("kickoff") ||
+    t.includes("inicio") ||
+    t.includes("start") ||
+    t === "1st half"
   );
+}
+
+function isHalftime(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    t.includes("halftime") ||
+    t.includes("half time") ||
+    t.includes("medio tiempo") ||
+    t === "ht"
+  );
+}
+
+function isMatchEnd(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    t.includes("full time") ||
+    t.includes("final") ||
+    t.includes("match ends") ||
+    t.includes("end of match") ||
+    t.includes("end match") ||
+    t === "ft"
+  );
+}
+
+function formatOtherLabel(text: string): string {
+  const t = text.toLowerCase();
+  if (isMatchStart(text)) return "INI";
+  if (isHalftime(text)) return "HT";
+  if (isMatchEnd(text)) return "FIN";
+  return "EVT";
+}
+
+function formatOtherColor(text: string): string {
+  const t = text.toLowerCase();
+  if (isMatchStart(text)) return "green";
+  if (isHalftime(text)) return "yellow";
+  if (isMatchEnd(text)) return "red";
+  return "gray";
 }
 
 function fmt(v: string | number): string {
@@ -154,7 +188,7 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
     setStatus("loading");
     setError(null);
 
-    getMatchDetail(match.leaguePath, match.eventId)
+    getUnifiedMatchDetail(match)
       .then((data) => {
         if (cancelled) return;
         if (!data) {
@@ -194,8 +228,6 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
     const lines: string[] = [];
 
     if (section === "stats") {
-      const barWidth = Math.min(20, Math.max(8, Math.floor(innerWidth * 0.18)));
-
       const show = detail.homeStats.map((hs, i) => ({
         label: hs.label,
         home: fmt(hs.value),
@@ -204,71 +236,58 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         awayRaw: extractNum(detail.awayStats[i]?.value ?? 0),
       }));
 
+      const maxLabel = show.reduce((m, s) => Math.max(m, labelOf(s.label).length), 0)
+      const labelWidth = Math.max(6, maxLabel + 1)
+      const dataColWidth = Math.max(
+        6,
+        Math.min(
+          20,
+          Math.floor((innerWidth - labelWidth - 6) / 3),
+        ),
+      );
+      const barWidth = Math.max(4, dataColWidth - 4);
+
       lines.push("");
       for (const s of show) {
-        const homeS = String(s.home).padStart(5);
-        const awayS = String(s.away).padEnd(5);
-        const lbl = labelOf(s.label).padEnd(20);
-        const bar = renderStatBar(s.homeRaw, s.awayRaw, barWidth);
-        lines.push(`  ${homeS}  ${bar}  ${awayS}  ${lbl}`);
+        const lbl = labelOf(s.label).slice(0, labelWidth).padEnd(labelWidth);
+        const homeS = String(s.home).padStart(dataColWidth);
+        const bar = renderStatBar(s.homeRaw, s.awayRaw, barWidth)
+          .padStart(Math.floor((dataColWidth + barWidth) / 2))
+          .padEnd(dataColWidth);
+        const awayS = String(s.away).padEnd(dataColWidth);
+        lines.push(`  ${lbl} ${homeS} ${bar} ${awayS}`);
       }
     }
 
     if (section === "events") {
-      const goals = detail.events.filter((e) => e.type === "goal");
-      const cards = detail.events.filter((e) => e.type === "card");
-      const subs = detail.events.filter((e) => e.type === "substitution");
-
-      if (goals.length > 0) {
-        lines.push("");
-        lines.push("  Goles");
-        for (const ev of goals) {
-          const s =
-            ev.homeScore !== undefined
-              ? ` (${ev.homeScore}-${ev.awayScore})`
-              : "";
-          const player = ev.playerName || ev.description;
-          lines.push(
-            `    ${ev.time.padEnd(6)} ${ev.team.padEnd(14)} ${player.slice(0, innerWidth - 24)}${s}`,
-          );
-        }
-      }
-
-      if (cards.length > 0) {
-        lines.push("");
-        lines.push("  Tarjetas");
-        for (const ev of cards) {
-          const player = ev.playerName || ev.description;
-          lines.push(
-            `    ${ev.time.padEnd(6)} ${ev.team.padEnd(14)} ${player}`,
-          );
-        }
-      }
-
-      if (subs.length > 0) {
-        lines.push("");
-        lines.push("  Cambios");
-        for (const ev of subs) {
-          if (ev.subOut && ev.subIn) {
-            lines.push(
-              `    ${ev.time.padEnd(6)} ${ev.team.padEnd(14)} ${ev.subOut} / ${ev.subIn}`,
-            );
-          } else {
-            lines.push(
-              `    ${ev.time.padEnd(6)} ${ev.team.padEnd(14)} ${ev.description.slice(0, innerWidth - 24)}`,
-            );
-          }
-        }
-      }
-
-      if (!goals.length && !cards.length && !subs.length) {
-        lines.push("");
-        lines.push("  No hay eventos registrados.");
-      }
+      // rendered via eventNodes
     }
 
     if (section === "lineups") {
-      lines.push("");
+      if (
+        detail.homeCoach ||
+        detail.awayCoach ||
+        detail.homeFormation ||
+        detail.awayFormation
+      ) {
+        lines.push("");
+        const coachWidth = Math.max(20, Math.floor((innerWidth - 6) / 3));
+        const hcName = detail.homeCoach?.name ?? "";
+        const acName = detail.awayCoach?.name ?? "";
+        const hForm = detail.homeFormation ? `[${detail.homeFormation}]` : "";
+        const aForm = detail.awayFormation ? `[${detail.awayFormation}]` : "";
+        lines.push(
+          `  DT: ${hcName.padEnd(coachWidth - 4)} ${"".padEnd(coachWidth)}  DT: ${acName.padEnd(coachWidth - 4)}`,
+        );
+        if (hForm || aForm) {
+          lines.push(
+            `  ${hForm.padEnd(coachWidth + 2)} ${"".padEnd(coachWidth)}  ${aForm}`,
+          );
+        }
+        lines.push("");
+      }
+
+      const colWidth = Math.max(12, Math.floor((innerWidth - 6) / 3));
       const max = Math.max(
         detail.homePlayers.length,
         detail.awayPlayers.length,
@@ -277,26 +296,54 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
         const hp = detail.homePlayers[i];
         const ap = detail.awayPlayers[i];
         const hc = hp
-          ? `${hp.jersey.padStart(2)} ${hp.name.padEnd(18)} ${hp.position.padEnd(4)}`
-          : "".padEnd(26);
-        const ac = ap
-          ? `${ap.jersey.padStart(2)} ${ap.name.padEnd(18)} ${ap.position.padEnd(4)}`
+          ? `${hp.jersey.padStart(2)} ${hp.name.padEnd(colWidth - 11)} ${hp.position.padEnd(4)}${hp.captain ? " C" : "  "}`
           : "";
-        lines.push(`  ${hc}  ${ac}`);
+        const ac = ap
+          ? `${ap.jersey.padStart(2)} ${ap.name.padEnd(colWidth - 11)} ${ap.position.padEnd(4)}${ap.captain ? " C" : "  "}`
+          : "";
+        lines.push(
+          `  ${hc.padEnd(colWidth)}  ${"".padEnd(colWidth)}  ${ac.padEnd(colWidth)}`,
+        );
       }
     }
 
     if (section === "h2h") {
-      if (detail.h2h && detail.h2h.length > 0) {
+      if (detail.h2hSummary) {
+        const s = detail.h2hSummary;
         lines.push("");
+        const isHome = detail.homeTeam;
+        const isAway = detail.awayTeam;
+        const homeLine = `  ${detail.homeTeam}: ${s.homeWins}G`;
+        const drawLine = `  Empates: ${s.draws}`;
+        const awayLine = `  ${detail.awayTeam}: ${s.awayWins}G`;
+        lines.push(homeLine.padEnd(25) + drawLine.padEnd(18) + awayLine);
+        lines.push("");
+      }
+
+      if (detail.h2h && detail.h2h.length > 0) {
         for (const h of detail.h2h) {
+          const tourney = h.tournament ? ` (${h.tournament})` : "";
           lines.push(
-            `  ${h.home.padEnd(20)} ${h.score.padStart(5)}  ${h.away.padEnd(20)}  ${h.date || ""}`,
+            `  ${h.home.padEnd(20)} ${h.score.padStart(5)}  ${h.away.padEnd(20)}  ${h.date || ""}${tourney}`,
           );
+        }
+      } else if (!detail.h2hSummary) {
+        lines.push("");
+        lines.push("  No hay historial de enfrentamientos.");
+      }
+    }
+
+    if (section === "injuries") {
+      if (detail.injuredPlayers && detail.injuredPlayers.length > 0) {
+        lines.push("");
+        for (const inj of detail.injuredPlayers) {
+          const reason = inj.reason ? ` (${inj.reason})` : "";
+          const pos = inj.position ? inj.position.padEnd(6) : "";
+          lines.push(`  ${inj.name.padEnd(22)} ${pos}${reason}`);
         }
       } else {
         lines.push("");
-        lines.push("  No hay historial de enfrentamientos.");
+        lines.push("  No hay lesionados reportados.");
       }
     }
 
@@ -306,136 +353,113 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
   const eventNodes = useMemo(() => {
     if (status !== "ready" || !detail) return [];
 
-    const nodes: React.ReactNode[] = [];
-    const goals = detail.events.filter((e) => e.type === "goal");
-    const cards = detail.events.filter((e) => e.type === "card");
-    const subs = detail.events.filter((e) => e.type === "substitution");
-    let k = 0;
+    const sorted = [...detail.events].sort((a, b) => {
+      const parseMin = (t: string) => {
+        const n = Number.parseInt(t, 10);
+        return Number.isFinite(n) ? n : 0;
+      };
+      return parseMin(a.time) - parseMin(b.time);
+    });
 
-    if (goals.length > 0) {
-      nodes.push(
-        <Text key={k++} color="white">
+    if (sorted.length === 0) {
+      return [
+        <Text key={0} color="white">
           {""}
         </Text>,
-      );
-      nodes.push(
-        <Text key={k++} color="white">
+        <Text key={1} color="white">
           {" "}
-          Goles
+          No hay eventos registrados.
         </Text>,
-      );
-      for (const ev of goals) {
-        const score =
-          ev.homeScore !== undefined
-            ? ` (${ev.homeScore}-${ev.awayScore})`
-            : "";
-        const player = ev.playerName || ev.description;
-        nodes.push(
-          <Text key={k++} color="white">
-            {"    "}
-            {ev.time.padEnd(6)}
-            {ev.team.padEnd(14)}
-            <Text color="cyan">G</Text> {player.slice(0, innerWidth - 35)}
-            {score}
-          </Text>,
-        );
-      }
+      ];
     }
 
-    if (cards.length > 0) {
-      nodes.push(
-        <Text key={k++} color="white">
-          {""}
-        </Text>,
-      );
-      nodes.push(
-        <Text key={k++} color="white">
-          {" "}
-          Tarjetas
-        </Text>,
-      );
-      for (const ev of cards) {
-        const player = ev.playerName || ev.description;
+    const nodes: React.ReactNode[] = [];
+    let k = 0;
+    const timeWidth = 6;
+    const typeWidth = 3;
+    const descWidth = innerWidth - timeWidth - typeWidth - 8;
+
+    for (const ev of sorted) {
+      const player = ev.playerName || ev.description;
+      const score =
+        ev.homeScore !== undefined ? ` (${ev.homeScore}-${ev.awayScore})` : "";
+      const time = ev.time.replace(/'/g, "");
+
+      if (ev.type === "goal") {
+        nodes.push(
+          <Text key={k++}>
+            {`  ${time.padEnd(timeWidth)} `}
+            <Text color="cyan">GOL</Text>
+            {` `}
+            <Text color="cyan">●</Text>
+            {` ${player.slice(0, descWidth - 2)}${score}`}
+          </Text>,
+        );
+      } else if (ev.type === "card") {
         if (ev.cardType === "second_yellow") {
           nodes.push(
-            <Text key={k++} color="white">
-              {"    "}
-              {ev.time.padEnd(6)}
-              {ev.team.padEnd(14)}
-              <Text color="yellow">!!</Text> <Text color="red">R</Text>{" "}
-              {player.slice(0, innerWidth - 37)}
+            <Text key={k++}>
+              {`  ${time.padEnd(timeWidth)} `}
+              <Text color="yellow">2TA</Text>
+              {` `}
+              <Text color="yellow">!!</Text>
+              {" "}
+              <Text color="red">R</Text>
+              {` ${player.slice(0, descWidth - 6)}`}
             </Text>,
           );
         } else if (ev.cardType === "red") {
           nodes.push(
-            <Text key={k++} color="white">
-              {"    "}
-              {ev.time.padEnd(6)}
-              {ev.team.padEnd(14)}
-              <Text color="red">R</Text> {player.slice(0, innerWidth - 35)}
+            <Text key={k++}>
+              {`  ${time.padEnd(timeWidth)} `}
+              <Text color="red">TR </Text>
+              {` `}
+              <Text color="red">R</Text>
+              {` ${player.slice(0, descWidth - 4)}`}
             </Text>,
           );
         } else {
           nodes.push(
-            <Text key={k++} color="white">
-              {"    "}
-              {ev.time.padEnd(6)}
-              {ev.team.padEnd(14)}
-              <Text color="yellow">!</Text> {player.slice(0, innerWidth - 35)}
+            <Text key={k++}>
+              {`  ${time.padEnd(timeWidth)} `}
+              <Text color="yellow">TA </Text>
+              {` `}
+              <Text color="yellow">!</Text>
+              {` ${player.slice(0, descWidth - 4)}`}
             </Text>,
           );
         }
-      }
-    }
-
-    if (subs.length > 0) {
-      nodes.push(
-        <Text key={k++} color="white">
-          {""}
-        </Text>,
-      );
-      nodes.push(
-        <Text key={k++} color="white">
-          {" "}
-          Cambios
-        </Text>,
-      );
-      for (const ev of subs) {
+      } else if (ev.type === "substitution") {
         if (ev.subOut && ev.subIn) {
           nodes.push(
-            <Text key={k++} color="white">
-              {"    "}
-              {ev.time.padEnd(6)}
-              {ev.team.padEnd(14)}
-              <Text color="red">↓</Text> {ev.subOut},{" "}
-              <Text color="green">↑</Text> {ev.subIn}
+            <Text key={k++}>
+              {`  ${time.padEnd(timeWidth)} `}
+              <Text color="green">CAM</Text>
+              {` `}
+              <Text color="red">↓</Text>
+              {` ${ev.subOut}, `}
+              <Text color="green">↑</Text>
+              {` ${ev.subIn.slice(0, descWidth - 10)}`}
             </Text>,
           );
         } else {
           nodes.push(
-            <Text key={k++} color="white">
-              {"    "}
-              {ev.time.padEnd(6)}
-              {ev.team.padEnd(14)}
-              {ev.description.slice(0, innerWidth - 24)}
+            <Text key={k++}>
+              {`  ${time.padEnd(timeWidth)} `}
+              <Text color="green">CAM</Text>
+              {` ${player.slice(0, descWidth)}`}
             </Text>,
           );
         }
+      } else {
+        const label = formatOtherLabel(ev.description);
+        const color = formatOtherColor(ev.description);
+        nodes.push(
+          <Text key={k++}>
+            <Text color={color}>{`  ${time.padEnd(timeWidth)} ${label.padEnd(typeWidth)} ${ev.description.slice(0, descWidth)}`}</Text>
+          </Text>,
+        );
       }
-    }
-
-    if (!goals.length && !cards.length && !subs.length) {
-      nodes.push(
-        <Text key={k++} color="white">
-          {""}
-        </Text>,
-      );
-      nodes.push(
-        <Text key={k++} color="white">
-          {" "}
-          No hay eventos registrados.
-        </Text>,
-      );
     }
 
     return nodes;
@@ -490,14 +514,22 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
     if (char === "2") setSection("events");
     if (char === "3") setSection("lineups");
     if (char === "4") setSection("h2h");
+    if (char === "5") setSection("injuries");
   });
 
-  const sections: DetailSection[] = ["stats", "events", "lineups", "h2h"];
+  const sections: DetailSection[] = [
+    "stats",
+    "events",
+    "lineups",
+    "h2h",
+    "injuries",
+  ];
   const tabLabels: Record<DetailSection, string> = {
     stats: "[1] Est",
     events: "[2] Ev",
     lineups: "[3] Ali",
     h2h: "[4] H2H",
+    injuries: "[5] Les",
   };
 
   const scrollInfo =
@@ -521,13 +553,20 @@ export function MatchDetail({ match, onClose }: MatchDetailProps) {
           <Box>
             {detail ? (
               <Box>
-                <Text color={pickColor(detail.homeColor, detail.homeAltColor)} bold>
+                <Text
+                  color={pickColor(detail.homeColor, detail.homeAltColor)}
+                  bold
+                >
                   {detail.homeTeam}
                 </Text>
                 <Text color="white" bold>
-                  {" "}{detail.homeScore}-{detail.awayScore}{" "}
+                  {" "}
+                  {detail.homeScore}-{detail.awayScore}{" "}
                 </Text>
-                <Text color={pickColor(detail.awayColor, detail.awayAltColor)} bold>
+                <Text
+                  color={pickColor(detail.awayColor, detail.awayAltColor)}
+                  bold
+                >
                   {detail.awayTeam}
                 </Text>
               </Box>

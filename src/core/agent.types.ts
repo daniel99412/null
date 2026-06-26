@@ -1,4 +1,5 @@
 import type { ChatMessage } from './llm-client.js'
+import type { ProviderIds, UnifiedPlayer, Coach, InjuredPlayer, H2hMatch } from './sports.types.js'
 
 export type AgentMode = 'deterministic' | 'llm' | 'react'
 
@@ -49,6 +50,7 @@ export interface DigestMatch {
   venue?: string
   eventId: string
   leaguePath: string
+  providerIds?: ProviderIds
 }
 
 export interface MatchDetailData {
@@ -78,9 +80,18 @@ export interface MatchDetailData {
     subIn?: string
     subOut?: string
   }>
-  homePlayers: Array<{ jersey: string; name: string; position: string }>
-  awayPlayers: Array<{ jersey: string; name: string; position: string }>
-  h2h?: Array<{ home: string; away: string; score: string; date: string }>
+  homePlayers: UnifiedPlayer[]
+  awayPlayers: UnifiedPlayer[]
+  homeCoach?: Coach
+  awayCoach?: Coach
+  homeFormation?: string
+  awayFormation?: string
+  h2h?: H2hMatch[]
+  h2hSummary?: { homeWins: number; draws: number; awayWins: number }
+  homePredictedPlayers?: UnifiedPlayer[]
+  awayPredictedPlayers?: UnifiedPlayer[]
+  injuredPlayers?: InjuredPlayer[]
+  providerIds?: ProviderIds
 }
 
 export interface AgentResponse {

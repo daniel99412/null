@@ -22,8 +22,8 @@ function formatDate(dateStr: string): string {
 }
 
 function statusBadge(game: DigestMatch): string {
-  if (game.status === 'in_progress') return 'EN VIVO'
-  if (game.status === 'final') return 'FINAL'
+  if (game.status === 'in_progress') return '★'
+  if (game.status === 'final') return '✔'
   return game.statusDetail || 'PROX'
 }
 
@@ -155,7 +155,7 @@ export function MatchList({ matches, onOpenMatch, onClose }: MatchListProps) {
                       <Box>
                         <Box flexGrow={1}>
                         {today && (
-                          <Text color="yellow" bold>! </Text>
+                          <Text color="yellow" bold>✱ </Text>
                         )}
                         <Text
                           color={isSelected ? accent : 'white'}
